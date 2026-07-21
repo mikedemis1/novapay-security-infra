@@ -1,0 +1,19 @@
+# Terraform state — contains secrets (e.g. IAM access keys) in plaintext
+*.tfstate
+*.tfstate.*
+
+# Local Terraform working dirs / caches
+.terraform/
+# .terraform.lock.hcl is intentionally NOT ignored — commit it for reproducible provider versions
+
+# Variable files that may hold secrets (the .example templates ARE tracked)
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+
+# Backend config holds the real AWS account ID — see backend.hcl.example
+backend.hcl
+
+# Crash logs
+crash.log
+crash.*.log
