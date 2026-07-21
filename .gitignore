@@ -1,0 +1,21 @@
+# Claude Code local tool config — not portfolio content
+.claude/
+
+# Internal working notes / session memory — not public
+_memory/
+
+# Personal learning journal / self-study / exam-prep material —
+# not something a senior engineer would publish alongside the project
+labs/
+research/
+LEARNING_LOG.md
+NovaPay_Map.md
+NovaPay_Map.pdf
+NovaPay_P1_Onboarding_Emails.pdf
+NovaPay_Blueprint_Diagrams.pdf
+PLAN.md
+CLAUDE.md
+
+# OS junk
+.DS_Store
+Thumbs.db
