@@ -11,6 +11,7 @@ resource "random_password" "db_credentials" {
 # undercut that least-privilege decision for no real consumer yet. Revisit
 # once a real app role needs both the CMK and this secret. See
 # SECURITY_DECISIONS.md 2026-07-17.
+#checkov:skip=CKV_AWS_149:Deliberate, see SECURITY_DECISIONS.md 2026-07-17, revisit at D3 when a real IAM role consumes this secret
 resource "aws_secretsmanager_secret" "db_credentials" {
   name                    = "novapay/db-credentials"
   recovery_window_in_days = 7

@@ -1,3 +1,15 @@
+# Every VPC gets an implicit default SG (allow-all within itself, allow-all
+# outbound) that nothing here references — lb/app/db each have their own.
+# Locked to zero rules so anything accidentally launched without an explicit
+# SG lands in a deny-all group instead of inheriting broad implicit trust.
+resource "aws_default_security_group" "main" {
+  vpc_id = aws_vpc.main.id
+
+  tags = {
+    Name = "novapay-default-sg-locked"
+  }
+}
+
 # Security groups form a chain: internet -> lb -> app -> db.
 # Each tier only accepts traffic from the tier directly in front of it.
 
