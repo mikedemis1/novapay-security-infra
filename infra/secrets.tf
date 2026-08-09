@@ -13,6 +13,7 @@ resource "random_password" "db_credentials" {
 # SECURITY_DECISIONS.md 2026-07-17.
 #checkov:skip=CKV_AWS_149:Deliberate, see SECURITY_DECISIONS.md 2026-07-17, revisit at D3 when a real IAM role consumes this secret
 resource "aws_secretsmanager_secret" "db_credentials" {
+  provider                = aws.workloads
   name                    = "novapay/db-credentials"
   recovery_window_in_days = 7
 
@@ -22,6 +23,7 @@ resource "aws_secretsmanager_secret" "db_credentials" {
 }
 
 resource "aws_secretsmanager_secret_version" "db_credentials" {
+  provider  = aws.workloads
   secret_id = aws_secretsmanager_secret.db_credentials.id
   secret_string = jsonencode({
     username = "novapay_app"

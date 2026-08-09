@@ -1,6 +1,7 @@
 resource "aws_wafv2_web_acl" "novapay_waf" {
-  name  = "novapay-waf"
-  scope = "REGIONAL"
+  provider = aws.workloads
+  name     = "novapay-waf"
+  scope    = "REGIONAL"
 
   visibility_config {
     cloudwatch_metrics_enabled = true

@@ -1,7 +1,8 @@
 # Test IAM user for iterating on least-privilege policies (D2 ③) without touching
 # the main admin account — a wrong policy here can't lock the real user out.
 resource "aws_iam_user" "test" {
-  name = "novapay-iam-test-user"
+  provider = aws.workloads
+  name     = "novapay-iam-test-user"
 
   tags = {
     Name = "novapay-iam-test-user"
@@ -9,7 +10,8 @@ resource "aws_iam_user" "test" {
 }
 
 resource "aws_iam_access_key" "test" {
-  user = aws_iam_user.test.name
+  provider = aws.workloads
+  user     = aws_iam_user.test.name
 }
 
 # Explicit Deny guardrail based on the IAM threat model (state.md ③):
@@ -58,11 +60,13 @@ data "aws_iam_policy_document" "deny_dangerous_actions" {
 }
 
 resource "aws_iam_policy" "deny_dangerous_actions" {
-  name   = "novapay-deny-dangerous-actions"
-  policy = data.aws_iam_policy_document.deny_dangerous_actions.json
+  provider = aws.workloads
+  name     = "novapay-deny-dangerous-actions"
+  policy   = data.aws_iam_policy_document.deny_dangerous_actions.json
 }
 
 resource "aws_iam_user_policy_attachment" "test_deny_dangerous_actions" {
+  provider   = aws.workloads
   user       = aws_iam_user.test.name
   policy_arn = aws_iam_policy.deny_dangerous_actions.arn
 }
@@ -102,12 +106,12 @@ data "aws_iam_policy_document" "read_only_d2" {
     resources = [aws_wafv2_web_acl.novapay_waf.arn]
   }
 
-  statement {
-    sid       = "ReadOnlyBudget"
-    effect    = "Allow"
-    actions   = ["budgets:ViewBudget"]
-    resources = ["arn:aws:budgets::${data.aws_caller_identity.current.account_id}:budget/${aws_budgets_budget.monthly_cap.name}"]
-  }
+  # ReadOnlyBudget statement removed 2026-08-08: this test user now lives in
+  # the Workloads account (D2 migration, SECURITY_DECISIONS.md), but the
+  # budget stays in Management to see org-wide consolidated cost. AWS Budgets
+  # has no resource-based/cross-account policy — an identity policy in one
+  # account can name another account's budget ARN, but AWS denies the call
+  # at runtime regardless, so the statement would be a no-op if left in.
 
   # ReadOnlySecret statement removed 2026-07-17: the secret it referenced
   # (aws_secretsmanager_secret.db_credentials) was destroyed after evidence
@@ -116,11 +120,13 @@ data "aws_iam_policy_document" "read_only_d2" {
 }
 
 resource "aws_iam_policy" "read_only_d2" {
-  name   = "novapay-read-only-d2"
-  policy = data.aws_iam_policy_document.read_only_d2.json
+  provider = aws.workloads
+  name     = "novapay-read-only-d2"
+  policy   = data.aws_iam_policy_document.read_only_d2.json
 }
 
 resource "aws_iam_user_policy_attachment" "test_read_only_d2" {
+  provider   = aws.workloads
   user       = aws_iam_user.test.name
   policy_arn = aws_iam_policy.read_only_d2.arn
 }

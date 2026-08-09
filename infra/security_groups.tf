@@ -3,7 +3,8 @@
 # Locked to zero rules so anything accidentally launched without an explicit
 # SG lands in a deny-all group instead of inheriting broad implicit trust.
 resource "aws_default_security_group" "main" {
-  vpc_id = aws_vpc.main.id
+  provider = aws.workloads
+  vpc_id   = aws_vpc.main.id
 
   tags = {
     Name = "novapay-default-sg-locked"
@@ -14,6 +15,7 @@ resource "aws_default_security_group" "main" {
 # Each tier only accepts traffic from the tier directly in front of it.
 
 resource "aws_security_group" "lb" {
+  provider    = aws.workloads
   name        = "novapay-lb-sg"
   description = "Load balancer: accepts HTTPS from the internet"
   vpc_id      = aws_vpc.main.id
@@ -40,6 +42,7 @@ resource "aws_security_group" "lb" {
 }
 
 resource "aws_security_group" "app" {
+  provider    = aws.workloads
   name        = "novapay-app-sg"
   description = "App servers: accept traffic only from the load balancer"
   vpc_id      = aws_vpc.main.id
@@ -66,6 +69,7 @@ resource "aws_security_group" "app" {
 }
 
 resource "aws_security_group" "db" {
+  provider    = aws.workloads
   name        = "novapay-db-sg"
   description = "Database: accept traffic only from app servers"
   vpc_id      = aws_vpc.main.id

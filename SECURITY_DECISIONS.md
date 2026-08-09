@@ -145,3 +145,65 @@ Running log of architecture/security decisions and why they were made. Written i
 **2. `CKV2_AWS_12` — default VPC security group not restricted.** Fixed: added `aws_default_security_group.main` in `infra/security_groups.tf` with zero ingress/egress rules. Unlike #1, there was no real trade-off here — lb/app/db already have dedicated SGs, so nothing depends on the default SG staying open; it only existed as a landmine for any future resource launched without an explicit SG. Checkov confirms PASSED.
 
 **3. `CKV_AWS_192` — WAF doesn't prevent Log4j2/JNDI lookup (Log4Shell, CVE-2021-44228).** Added a 4th WAF rule (`AWSManagedRulesKnownBadInputsRuleSet`) in `infra/waf.tf`, in `count` mode — same as the existing 3 rules, per the D2 decision to keep the whole WAF in observe-only mode until rule behavior is validated against real traffic. Checkov still fails this check because it specifically requires blocking (`none {}`) action, not counting; confirmed by an isolated test swapping `count{}` for `none{}`, which passes. Added `#checkov:skip=CKV_AWS_192` with the same caveat as #1 about local suppression not taking effect. Will resolve naturally once the WAF as a whole moves from count to block mode — not before, to avoid making that call for one rule in isolation.
+
+---
+
+## 2026-08-08 — D2 infra stays in the Management account; migration to the real Workloads account deferred
+
+**Context:** D1 created real `novapay-security` and `novapay-workloads` member accounts (see `ARCHITECTURE_D1.md`, Option Γ). All of D2 (VPC, WAF, KMS, Secrets Manager, IAM, state backend) was built earlier and still lives in the Management account — enabling AWS Organizations didn't move anything, it only added the org structure around the existing account.
+
+**Decision:** D2 infra is **not** migrated into the real Workloads account as part of D1. It stays where it is, and this is documented as a known, deliberate gap rather than an oversight.
+
+**Why:** There is no in-place "move" between AWS accounts — the only path is destroy the resources in the Management account and recreate them fresh in the Workloads account (new resource IDs, a new KMS key, re-running every D2 apply). That's a real rebuild cost for a change that doesn't alter any control's behavior, only which account it lives under — and there's no live workload or real data at stake yet that migration would actually protect. In a real company, keeping application infrastructure in the Management account long-term would be a genuine finding (the Management account should stay minimal — see `research/2026-07-28-senior-cloud-security-gap-analysis.md`); here it's accepted short-term so the cost of the rebuild is paid once, deliberately, later.
+
+**Revisit:** planned as a standalone step after the rest of P1, done by hand (not by Claude) as a deliberate exercise in cross-account resource migration — a real skill, worth doing hands-on rather than delegating.
+
+---
+
+## 2026-08-08 — Combined Security/Audit account, not split Log Archive + Security Tooling; deferred
+
+**Context:** A gap-analysis scan against the AWS Security Reference Architecture (see [[cybersecurity projects/Novapay project/research/2026-07-28-senior-cloud-security-gap-analysis|gap analysis]]) found that the SRA's gold-standard pattern splits log storage and security tooling into two separate accounts: a **Log Archive account** (immutable storage only) and a **Security Tooling account** (delegated admin for GuardDuty/Security Hub/CloudTrail management). NovaPay combined both into one `novapay-security` account.
+
+**Decision:** Not split for D1. Documented as a deliberate, accepted simplification, same reasoning family as the D2-to-Workloads migration above.
+
+**Why:** Splitting means a 4th real AWS account (another root email, another go/no-go, another OU placement) purely to separate two roles that, at this project's scale, are both operated by the same single person anyway — the SRA's benefit (compromising one account doesn't hand over both the log archive and the detection tooling) is real but scoped to orgs where different teams/humans actually hold those two accounts. Revisit if NovaPay ever needs to demonstrate that separation concretely (e.g., a second operator, or an audit requiring it) rather than doing it preemptively.
+
+---
+
+## 2026-08-08 — Root account MFA (all 3 accounts) deferred, not skipped
+
+**Context:** The same gap-analysis (finding #2) found none of the 3 accounts (Management, Security, Workloads) has MFA enabled on its root user — CIS AWS Foundations control #1. Root can't be scoped by IAM/SCPs the way every other principal can, so it's the highest-value target of the three; compromising the email tied to an account's root user is currently the softest path to full control of that account.
+
+**Decision:** Not implemented in this D1 session. Explicitly deferred, to be done by hand (root credential/MFA setup has no Terraform API — AWS deliberately keeps this console-only).
+
+**Why:** Time-boxed session; doing it properly for 3 accounts (including first setting a root password on the 2 member accounts, which don't have one by default) is a real chunk of manual work on its own. Unlike #3 (an architecture trade-off that's arguably fine to leave permanently), this one has no "acceptable forever" version — it should get done soon, not treated as settled debt.
+
+---
+
+## 2026-08-08 — D2→Workloads migration implemented by Claude (reverses the "done by hand" plan above); KMS key split; provider-reassignment orphan trap caught in `terraform plan`
+
+**Context:** The 2026-08-08 entry above planned this migration as a manual exercise, done by the user later. The user asked Claude to implement it instead, in this same session.
+
+**Decision 1 — how D2 moves:** Added a second `aws` provider alias (`aws.workloads`) in `providers.tf`, assuming `OrganizationAccountAccessRole` in the real Workloads account (`277606037083`) — the role Organizations creates automatically in every member account, assumable from Management with no extra IAM setup. Every D2 resource that belongs to a workload (VPC + subnets + route tables, the 3 security groups, the WAF ACL, the Secrets Manager secret, the test IAM user + its policies) got `provider = aws.workloads` added. Org-level resources (Organizations, the 2 accounts, the SCP, the org CloudTrail trail, the budget) stay on the default provider in Management — AWS requires this, it isn't a choice.
+
+**Decision 2 — KMS key split:** `novapay-transaction-key` was encrypting the CloudTrail bucket (fixed 2026-08-08, same day as the migration-deferral entry above) but was labeled/intended as a future app-data key. Moving it wholesale to Workloads would make a security landing zone's audit-log encryption depend on a key owned by the account being audited — a separation-of-duties violation the AWS SRA specifically warns against. **Chosen: split into two keys.** The existing key stays in Management, renamed in-state via a `moved` block (`aws_kms_key.transactions` → `aws_kms_key.cloudtrail_logs`, alias → `alias/novapay-cloudtrail-key`) — no destroy, no re-encryption, zero risk to the CloudTrail logs it already protects. A brand-new key (`aws_kms_key.app_data`, alias `alias/novapay-transaction-key`) is created fresh in the Workloads account for future transaction data. Cost delta: ~$1/month for the second CMK.
+
+**Decision 3 (process correction) — `ReadOnlyBudget` IAM statement dropped:** The test user's read-only policy granted `budgets:ViewBudget` on the Management-account budget. AWS Budgets has no resource-based/cross-account policy mechanism, so once the test user moves to Workloads this permission would be a silent no-op (AWS denies the call regardless of the IAM policy). Removed with a comment rather than left as dead configuration.
+
+**Critical finding — provider reassignment does not safely migrate live resources:** A dry-run `terraform plan` (before any apply) showed that simply adding `provider = aws.workloads` to an *already-applied* resource does not make Terraform destroy the old object and create a new one. Terraform refreshes the existing state entry using the **new** provider's credentials; for resources where a describe-by-ID against the wrong account returns "not found" rather than an auth error (VPC, subnets, security groups, WAF ACL, IAM user), Terraform concludes the object "has been deleted" and silently drops it from state — then plans a fresh `create` in Workloads. The real objects in the Management account are never actually deleted; they become orphaned, untracked, still billing, still present as attack surface. (Secrets Manager was the exception: cross-account `DescribeSecret` returns `AccessDeniedException`, which surfaced as a hard plan error instead of silent drift — that's what caught this before any apply ran.)
+
+**Corrected procedure:** two separate Terraform runs, not one:
+1. `git stash` (temporarily restore the old, single-provider config) → `terraform destroy -target=aws_vpc.main -target=aws_wafv2_web_acl.novapay_waf -target=aws_secretsmanager_secret.db_credentials -target=aws_iam_user.test -target=aws_iam_policy.deny_dangerous_actions -target=aws_iam_policy.read_only_d2` — cleanly deletes the real Management-account objects (dependents like subnets/SGs/route tables/the secret version/the access key cascade automatically as targets of `aws_vpc.main`/`aws_secretsmanager_secret.db_credentials`/`aws_iam_user.test`).
+2. `git stash pop` (restore the `aws.workloads`-provider config) → `terraform apply` — creates all of it fresh in the Workloads account.
+
+**Why this matters beyond this one migration:** this is the general trap in any "move a resource to a different provider/account/region" change in Terraform — it looks like a one-line diff (`provider = ...`) but is never a safe in-place operation, and whether it fails loudly or silently orphans depends on which AWS API the resource happens to use for reads. Worth remembering for D3/D4 if similar account moves come up again.
+
+**Outcome:** executed successfully. `terraform destroy -target=...` (old, single-provider config) cleanly removed all 29 D2 resources from the Management account; `terraform apply` (new, `aws.workloads`-provider config) created all of them fresh in the Workloads account. Final `terraform plan` confirmed zero drift.
+
+**Two more real findings surfaced only by running this against live AWS, not by review:**
+
+1. **The `cloudtrail_logs` key's admin policy was missing `kms:DeleteAlias`.** This key's policy has no "Enable IAM User Permissions" delegation statement — it's fully explicit, so *every* management action the admin can take must be listed by name; IAM permissions on the calling user are irrelevant if the key's own policy doesn't also allow it. The original 2026-07-17 policy only anticipated `kms:CreateAlias` (aliases get created, not renamed) — renaming one needs `DeleteAlias` too. Added `kms:DeleteAlias`, `kms:UpdateKeyDescription`, `kms:UntagResource` to both this key's policy and the new `app_data` key's policy (added there pre-emptively, before hitting the same gap twice).
+
+2. **The AWS provider updates `description` before `policy` within a single `aws_kms_key` resource update.** Changing both the key's description and its policy in the same `terraform apply` meant `UpdateKeyDescription` ran against the *old*, not-yet-applied policy and got denied — even after the fix in finding 1 landed in the Terraform config, because the config being valid doesn't matter if AWS hasn't received the new policy yet at the moment the provider makes that particular API call. Worked around by applying the policy-only change first (temporarily leaving the description unchanged), then applying the description change in a second, separate `terraform apply` — by then the already-live policy permitted it. Not a NovaPay-specific bug: any single Terraform apply that both grants a permission *and* immediately exercises it via a different API call on the same resource can hit this ordering issue, regardless of provider. If it recurs elsewhere, splitting into two applies (permission-grant first, dependent action second) is the fix.
+
+**Open choice not yet made:** virtual MFA (authenticator app, free, immediate) vs. hardware MFA key (CIS v3.0's actual recommendation for root, but costs money and requires ordering hardware first). Decide this when actually doing the work.
