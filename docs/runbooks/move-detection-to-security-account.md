@@ -32,10 +32,10 @@ Error: reading SNS Topic (...): AuthorizationError
 Error: reading Security Hub Organization Configuration (...): InvalidAccessException
 ```
 
-**1. Confirm what is about to be destroyed.** Switch to the code as it was before the move, so the old addresses still match the state:
+**1. Confirm what is about to be destroyed.** Switch to the code as it was before the move, so the old addresses still match the state. That is the `pre-detection-move` tag, not `main`: the move was merged into `main` in PR #1, so checking out `main` here would hand you the *new* code and reproduce the step 0 error instead of avoiding it.
 
 ```
-git checkout main
+git checkout pre-detection-move    # detached HEAD, deliberately; annotated tag on 35c35cc
 cd infra
 terraform plan -destroy \
   -target=aws_sns_topic_subscription.security_alerts_email \
@@ -56,7 +56,7 @@ Between this step and step 3 there is no alerting. Detection keeps running; only
 **3. Apply the new code.**
 
 ```
-git checkout p1-hardening
+git checkout main
 terraform apply
 ```
 
