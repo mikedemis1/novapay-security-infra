@@ -1,11 +1,11 @@
-# Renamed 2026-08-08 (D2->Workloads migration, SECURITY_DECISIONS.md): this
-# key started life as a generic "future transaction data" CMK but became
-# CloudTrail's real encryption key at the 2026-08-08 gap-analysis fix. Moving
-# D2 to the Workloads account meant deciding whether this key moves with it —
-# it doesn't: CloudTrail's trail lives in the Management account and a
-# security landing zone's log-encryption key must not be owned by the
-# account it's auditing (AWS SRA guidance). Renamed in place (no destroy) to
-# reflect its actual, sole job now.
+# Renamed in place (no destroy) when this key stopped being a generic
+# "future transaction data" CMK and became the trail's key. The rename used a
+# moved block so the already-encrypted log objects were never rewritten.
+#
+# Placement is a known compromise, not the target: the key sits in the same
+# account as the trail it protects, and that account is itself audited by the
+# trail and exempt from every SCP. The AWS SRA puts log keys in the Log
+# Archive account for exactly that reason. Recorded rather than hidden.
 moved {
   from = aws_kms_key.transactions
   to   = aws_kms_key.cloudtrail_logs
@@ -75,7 +75,10 @@ data "aws_iam_policy_document" "kms_cloudtrail_logs" {
       type        = "Service"
       identifiers = ["cloudtrail.amazonaws.com"]
     }
-    actions   = ["kms:GenerateDataKey*"]
+    # Decrypt is needed only because the bucket sets bucket_key_enabled:
+    # CloudTrail has to read the bucket-level data key before it can write.
+    # Both actions stay bound to this one trail by encryption context.
+    actions   = ["kms:GenerateDataKey*", "kms:Decrypt"]
     resources = ["*"]
 
     condition {

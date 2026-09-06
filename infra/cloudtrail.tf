@@ -109,5 +109,11 @@ resource "aws_cloudtrail" "org_trail" {
   include_global_service_events = true
   enable_log_file_validation    = true
 
+  # Without this the trail encrypts with SSE-S3 regardless of what the bucket
+  # default says: CloudTrail sets the algorithm on its own PutObject, and the
+  # per-object choice wins over the bucket default. That is how the 2026-08-08
+  # "fix" silently did nothing for a month.
+  kms_key_id = aws_kms_key.cloudtrail_logs.arn
+
   depends_on = [aws_s3_bucket_policy.cloudtrail_logs]
 }
