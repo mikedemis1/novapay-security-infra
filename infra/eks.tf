@@ -114,6 +114,14 @@ data "aws_iam_policy_document" "app_secret_read" {
     actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
     resources = [aws_secretsmanager_secret.db_credentials.arn]
   }
+
+  # Reading a CMK-encrypted secret needs the key too. Scoping is handled by
+  # the key policy's kms:ViaService condition (kms.tf).
+  statement {
+    effect    = "Allow"
+    actions   = ["kms:Decrypt"]
+    resources = [aws_kms_key.app_data.arn]
+  }
 }
 
 resource "aws_iam_policy" "app_secret_read" {

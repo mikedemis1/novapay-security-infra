@@ -137,9 +137,9 @@ resource "aws_kms_alias" "app_data" {
   target_key_id = aws_kms_key.app_data.key_id
 }
 
-# Admin (root of the Workloads account) gets management actions only — no
-# kms:Encrypt/Decrypt/GenerateDataKey for bulk application data until a real
-# app role needs it, same reasoning as the CloudTrail key above.
+# Admin (root of the Workloads account) gets management actions only. Usage is
+# delegated to IAM, but only through Secrets Manager, so a stolen role cannot
+# call Decrypt against this key directly.
 data "aws_iam_policy_document" "kms_app_data" {
   statement {
     sid    = "AdminManageKey"
@@ -165,5 +165,27 @@ data "aws_iam_policy_document" "kms_app_data" {
       "kms:UpdateKeyDescription",
     ]
     resources = ["*"]
+  }
+
+  # The consumer is the IRSA role in eks.tf, which is granted
+  # secretsmanager:GetSecretValue plus kms:Decrypt on this key. The condition
+  # is what keeps that grant narrow: IAM decides who, this decides through
+  # what. Repeating the condition on the role's own policy would add nothing,
+  # since both policies must allow the call.
+  statement {
+    sid    = "AllowUseOnlyThroughSecretsManager"
+    effect = "Allow"
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::${data.aws_caller_identity.workloads.account_id}:root"]
+    }
+    actions   = ["kms:Decrypt", "kms:GenerateDataKey*", "kms:DescribeKey"]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["secretsmanager.eu-west-1.amazonaws.com"]
+    }
   }
 }
