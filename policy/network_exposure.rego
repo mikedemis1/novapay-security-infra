@@ -25,10 +25,23 @@ ingress_rules(sg) := sg.ingress if is_array(sg.ingress)
 
 ingress_rules(sg) := [sg.ingress] if is_object(sg.ingress)
 
+# The two address families are separate fields and a rule may set either, so
+# checking cidr_blocks alone let ::/0 through on any port.
+world_open(rule) if "0.0.0.0/0" in rule.cidr_blocks
+
+world_open(rule) if "::/0" in rule.ipv6_cidr_blocks
+
+# 443 alone is the exception, not a range that happens to start at 443:
+# from_port = 443, to_port = 65535 opens every high port and used to pass.
+https_only(rule) if {
+	rule.from_port == 443
+	rule.to_port == 443
+}
+
 deny contains msg if {
 	some name, sg in input.resource.aws_security_group
 	some rule in ingress_rules(sg)
-	"0.0.0.0/0" in rule.cidr_blocks
-	rule.from_port != 443
-	msg := sprintf("aws_security_group.%s: ingress from 0.0.0.0/0 on port %v; only 443 may be world-reachable (DORA Art. 9(4)(c))", [name, rule.from_port])
+	world_open(rule)
+	not https_only(rule)
+	msg := sprintf("aws_security_group.%s: ingress from the internet on ports %v-%v; only 443 may be world-reachable (DORA Art. 9(4)(c))", [name, rule.from_port, rule.to_port])
 }

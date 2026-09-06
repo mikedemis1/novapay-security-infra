@@ -102,15 +102,22 @@ jobs:
             $(find infra -name '*.tf') | tee conftest.txt
 
       # A policy suite that has only run against compliant code has not been
-      # tested. This fixture violates every rule on purpose, so the step fails
-      # if conftest reports success.
+      # tested. This fixture violates every rule on purpose.
+      #
+      # Counting matters. Asserting only that conftest exits non-zero passes as
+      # long as any single rule fires, so thirteen rules could quietly stop
+      # working and the step would stay green. The count is the assertion; when
+      # a rule or a fixture case is added, this number moves with it.
       - name: policy self-test
+        env:
+          EXPECTED_FAILURES: 14
         run: |
-          if conftest test --parser hcl2 --policy policy --all-namespaces policy/fixtures/violations.tf.fixture >/dev/null 2>&1; then
-            echo "::error::the deliberate violations passed; a rule has stopped working"
+          actual=$(conftest test --parser hcl2 --policy policy --all-namespaces             --output json policy/fixtures/violations.tf.fixture             | jq '[.[].failures[]] | length')
+          if [ "$actual" -ne "$EXPECTED_FAILURES" ]; then
+            echo "::error::fixture produced $actual denials, expected $EXPECTED_FAILURES; a rule stopped working or a case was added without updating the count"
             exit 1
           fi
-          echo "policy rules fire on known-bad input"
+          echo "all $actual policy rules fire on known-bad input"
 
       - name: upload sarif
         if: always()

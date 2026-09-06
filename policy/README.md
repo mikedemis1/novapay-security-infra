@@ -28,7 +28,9 @@ Article 9(4)(e), change management, is arguably evidenced by this pipeline exist
 
 ## Testing the policies
 
-`policy/fixtures/violations.tf.fixture` breaks every rule on purpose. The pipeline runs Conftest against it and fails if it comes back clean, because a policy suite that has only been run against compliant code has not been tested.
+`policy/fixtures/violations.tf.fixture` breaks every rule on purpose, because a policy suite that has only been run against compliant code has not been tested.
+
+The pipeline counts the denials rather than checking that Conftest merely failed. A pass/fail check is satisfied by any one rule firing, so most of the suite could stop working behind a step that stays green. The expected count lives in `EXPECTED_FAILURES` in the workflow and moves whenever a rule or a fixture case is added.
 
 The extension is not `.tf` so that Checkov, `terraform fmt` and `terraform validate` ignore it. Conftest reads it because the parser is passed explicitly.
 
@@ -39,7 +41,21 @@ conftest test --parser hcl2 --policy policy --all-namespaces $(find infra -name 
 conftest test --parser hcl2 --policy policy --all-namespaces policy/fixtures/violations.tf.fixture
 ```
 
-The first must pass. The second must fail with nine findings.
+The first must pass. The second must fail with fourteen findings, one per row below.
+
+## Rules that passed what they claimed to block
+
+Five cases at the end of the fixture were added on 2026-09-06, after a review found four rules checking that a field was *present* rather than what it *contained*. Each of these was clean under the old rules:
+
+| Input | Why it passed |
+|---|---|
+| `ingress` on port 22 from `::/0` | the rule read `cidr_blocks` and never `ipv6_cidr_blocks` |
+| `ingress` from `0.0.0.0/0`, ports 443-65535 | only `from_port` was compared to 443, so the upper bound was free |
+| EKS with `cluster_endpoint_public_access_cidrs = ["0.0.0.0/0"]` | the rule required the list to exist, not to restrict anything |
+| Secret with `kms_key_id = "alias/aws/secretsmanager"` | presence of `kms_key_id` was read as "customer-managed" |
+| Trail with `kms_key_id = "alias/aws/s3"` | the same presence check, on the resource the project had already been burned by |
+
+The shape is the same every time, and it is the same shape as the CloudTrail bug in the repository root README: a check that confirms a setting was configured, not that it does anything. A rule that cannot fail on the input it was written to reject is documentation with a build step.
 
 ## The rule that did not work
 

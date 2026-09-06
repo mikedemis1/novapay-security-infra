@@ -22,3 +22,11 @@ deny contains msg if {
 	not trail.kms_key_id
 	msg := sprintf("aws_cloudtrail.%s: kms_key_id must be set, or the trail writes SSE-S3 whatever the bucket default says (DORA Art. 9(4)(d))", [name])
 }
+
+# Setting kms_key_id to alias/aws/s3 passes the presence check above and
+# leaves the trail exactly as readable as it was.
+deny contains msg if {
+	some name, trail in input.resource.aws_cloudtrail
+	startswith(trail.kms_key_id, "alias/aws/")
+	msg := sprintf("aws_cloudtrail.%s: kms_key_id is %s, an AWS-managed key (DORA Art. 9(4)(d))", [name, trail.kms_key_id])
+}

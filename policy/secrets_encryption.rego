@@ -12,3 +12,11 @@ deny contains msg if {
 	not secret.kms_key_id
 	msg := sprintf("aws_secretsmanager_secret.%s: kms_key_id must be a customer-managed key (DORA Art. 9(2))", [name])
 }
+
+# alias/aws/secretsmanager satisfies "kms_key_id is set" while being precisely
+# the AWS-managed key the rule above exists to reject.
+deny contains msg if {
+	some name, secret in input.resource.aws_secretsmanager_secret
+	startswith(secret.kms_key_id, "alias/aws/")
+	msg := sprintf("aws_secretsmanager_secret.%s: kms_key_id is %s, an AWS-managed key (DORA Art. 9(2))", [name, secret.kms_key_id])
+}

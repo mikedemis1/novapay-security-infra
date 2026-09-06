@@ -37,3 +37,45 @@ module "bad_eks" {
   source                         = "terraform-aws-modules/eks/aws"
   cluster_endpoint_public_access = true
 }
+
+# --- Evasions. Every resource below passed the suite clean until 2026-09-06:
+# each one satisfied a rule that checked a field's presence, or one bound of a
+# range, instead of the value that mattered.
+
+resource "aws_security_group" "bad_ipv6" {
+  name = "bad-ipv6"
+  ingress {
+    from_port        = 22
+    to_port          = 22
+    protocol         = "tcp"
+    ipv6_cidr_blocks = ["::/0"]
+  }
+}
+
+resource "aws_security_group" "bad_port_range" {
+  name = "bad-port-range"
+  ingress {
+    from_port   = 443
+    to_port     = 65535
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+module "bad_eks_open_cidr" {
+  source                               = "terraform-aws-modules/eks/aws"
+  cluster_endpoint_public_access       = true
+  cluster_endpoint_public_access_cidrs = ["0.0.0.0/0"]
+}
+
+resource "aws_secretsmanager_secret" "bad_aws_managed_key" {
+  name       = "bad-aws-managed-key"
+  kms_key_id = "alias/aws/secretsmanager"
+}
+
+resource "aws_cloudtrail" "bad_aws_managed_key" {
+  name                       = "bad-aws-managed-key"
+  s3_bucket_name             = "x"
+  enable_log_file_validation = true
+  kms_key_id                 = "alias/aws/s3"
+}
