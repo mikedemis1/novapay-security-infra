@@ -4,13 +4,8 @@
 # 2026-07-14, but here the billing is hourly not just "exists", so leaving
 # it running is a faster way to blow the 40 EUR/month cap).
 module "eks" {
-  source  = "terraform-aws-modules/eks/aws"
-  version = "~> 20.0"
-
-  providers = {
-    aws = aws.workloads
-  }
-
+  source       = "terraform-aws-modules/eks/aws"
+  version      = "~> 20.0"
   cluster_name = "novapay-eks"
   # 1.30 (the first guess) turned out to be past EKS standard AND extended
   # support already - `aws eks describe-cluster-versions` is ground truth,
@@ -42,14 +37,14 @@ module "eks" {
     }
   }
 
-  vpc_id = aws_vpc.main.id
+  vpc_id = data.terraform_remote_state.platform.outputs.vpc_id
   # Control plane ENIs span both tiers; worker nodes (below) stay in the
   # private app subnets only, matching the app-tier pattern from D2.
   subnet_ids = [
-    aws_subnet.app_a.id,
-    aws_subnet.app_b.id,
-    aws_subnet.public_a.id,
-    aws_subnet.public_b.id,
+    local.app_subnet_ids[0],
+    local.app_subnet_ids[1],
+    local.public_subnet_ids[0],
+    local.public_subnet_ids[1],
   ]
 
   enable_irsa = true
@@ -60,7 +55,7 @@ module "eks" {
       min_size       = 1
       max_size       = 1
       desired_size   = 1
-      subnet_ids     = [aws_subnet.app_a.id, aws_subnet.app_b.id]
+      subnet_ids     = [local.app_subnet_ids[0], local.app_subnet_ids[1]]
     }
   }
 
@@ -75,8 +70,6 @@ module "eks" {
 # to read exactly one secret (the D2 db-credentials secret) and nothing
 # else — ties D2 and D3 together instead of being a disconnected demo.
 data "aws_iam_policy_document" "app_irsa_trust" {
-  provider = aws.workloads
-
   statement {
     effect  = "Allow"
     actions = ["sts:AssumeRoleWithWebIdentity"]
@@ -101,18 +94,15 @@ data "aws_iam_policy_document" "app_irsa_trust" {
 }
 
 resource "aws_iam_role" "app_irsa" {
-  provider           = aws.workloads
   name               = "novapay-transaction-service-irsa"
   assume_role_policy = data.aws_iam_policy_document.app_irsa_trust.json
 }
 
 data "aws_iam_policy_document" "app_secret_read" {
-  provider = aws.workloads
-
   statement {
     effect    = "Allow"
     actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
-    resources = [aws_secretsmanager_secret.db_credentials.arn]
+    resources = [data.terraform_remote_state.platform.outputs.db_secret_arn]
   }
 
   # Reading a CMK-encrypted secret needs the key too. Scoping is handled by
@@ -120,18 +110,16 @@ data "aws_iam_policy_document" "app_secret_read" {
   statement {
     effect    = "Allow"
     actions   = ["kms:Decrypt"]
-    resources = [aws_kms_key.app_data.arn]
+    resources = [data.terraform_remote_state.platform.outputs.app_data_kms_key_arn]
   }
 }
 
 resource "aws_iam_policy" "app_secret_read" {
-  provider = aws.workloads
-  name     = "novapay-transaction-service-secret-read"
-  policy   = data.aws_iam_policy_document.app_secret_read.json
+  name   = "novapay-transaction-service-secret-read"
+  policy = data.aws_iam_policy_document.app_secret_read.json
 }
 
 resource "aws_iam_role_policy_attachment" "app_irsa_secret_read" {
-  provider   = aws.workloads
   role       = aws_iam_role.app_irsa.name
   policy_arn = aws_iam_policy.app_secret_read.arn
 }

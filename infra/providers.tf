@@ -12,14 +12,6 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.6"
     }
-    kubernetes = {
-      source  = "hashicorp/kubernetes"
-      version = "~> 2.33"
-    }
-    helm = {
-      source  = "hashicorp/helm"
-      version = "~> 2.14"
-    }
   }
 
   # bucket intentionally omitted — real AWS account ID stays out of version
@@ -88,26 +80,4 @@ provider "aws" {
 
 data "aws_caller_identity" "workloads" {
   provider = aws.workloads
-}
-
-# D3: kubernetes/helm providers authenticate to the novapay-eks cluster
-# (Workloads account) using a short-lived token from the same assumed role
-# used for every other Workloads resource.
-data "aws_eks_cluster_auth" "this" {
-  provider = aws.workloads
-  name     = module.eks.cluster_name
-}
-
-provider "kubernetes" {
-  host                   = module.eks.cluster_endpoint
-  cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
-  token                  = data.aws_eks_cluster_auth.this.token
-}
-
-provider "helm" {
-  kubernetes {
-    host                   = module.eks.cluster_endpoint
-    cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
-    token                  = data.aws_eks_cluster_auth.this.token
-  }
 }

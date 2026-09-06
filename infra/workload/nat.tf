@@ -7,8 +7,7 @@
 # regardless of whether it does hourly, this is-hours-not-months money, but
 # a forgotten month would blow the 40 EUR/month cap on its own).
 resource "aws_eip" "nat" {
-  provider = aws.workloads
-  domain   = "vpc"
+  domain = "vpc"
 
   tags = {
     Name = "novapay-nat-eip-TEMP-d3"
@@ -16,20 +15,16 @@ resource "aws_eip" "nat" {
 }
 
 resource "aws_nat_gateway" "main" {
-  provider      = aws.workloads
   allocation_id = aws_eip.nat.id
-  subnet_id     = aws_subnet.public_a.id
+  subnet_id     = local.public_subnet_ids[0]
 
   tags = {
     Name = "novapay-nat-TEMP-d3"
   }
-
-  depends_on = [aws_internet_gateway.main]
 }
 
 resource "aws_route" "private_nat" {
-  provider               = aws.workloads
-  route_table_id         = aws_route_table.private.id
+  route_table_id         = data.terraform_remote_state.platform.outputs.private_route_table_id
   destination_cidr_block = "0.0.0.0/0"
   nat_gateway_id         = aws_nat_gateway.main.id
 }
