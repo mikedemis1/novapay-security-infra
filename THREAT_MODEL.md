@@ -40,7 +40,7 @@ Two catalogues are used. STRIDE frames the threats per trust boundary, because t
 |---|---|---|---|
 | Spoofing | Root account password reset using a known root email address | root MFA on every account | **partial: one account still lacks it** |
 | Spoofing | Stolen static access key used from anywhere | humans through Identity Center, no IAM users in Terraform, no long-lived keys | partial: true of Terraform only since 2026-09-06, and two administrator IAM users still exist outside it |
-| Elevation | Cluster API reachable from any address | `cluster_endpoint_public_access_cidrs`, now a required input | live |
+| Elevation | Cluster API reachable from any address | `cluster_endpoint_public_access_cidrs`, now a required input | enforced when a cluster exists; none does |
 | Information disclosure | Account root emails readable in public git history | branch deletion, which did not work; needs a garbage-collection request | **open** |
 
 The first and last rows compound. A root email that is readable and an account without MFA are one finding, not two, and that is the highest-priority open item in the repository.
@@ -115,17 +115,25 @@ The deletion gap matters more than it looks: the design once claimed a bucket po
 
 Mapped to the OWASP Kubernetes Top 10.
 
+**No cluster is running.** It is created for a test day and destroyed the same
+day, because the control plane bills about 0.10 USD an hour. So `enforced` below
+means the control was applied to a real cluster and, where noted, tested by
+deliberate violation on 2026-08-09; it does not mean anything is running now.
+The evidence is `evidence/2026-08-09-cluster-control-tests.md`. The permanent
+part of this boundary is the code in `infra/workload/`, which the pipeline
+checks on every pull request.
+
 | OWASP K8s | Threat | Control | Status |
 |---|---|---|---|
-| K01 insecure workload configuration | Privileged or root containers | Pod Security Standards `restricted`, Kyverno in enforce | live, tested by violation |
-| K01 | Writable root filesystem | enforced read-only, with explicit volumes | live, tested |
-| K03 overly permissive RBAC | Pod identity reaching more than it needs | IRSA scoped by both subject and audience, one secret | live |
-| K04 lack of centralised policy enforcement | Policy applied by convention | Kyverno cluster policies | live |
-| K06 broken authentication | Cluster API open to the internet | endpoint allow list now required | live |
-| K07 missing network segmentation | Lateral movement between pods | default-deny plus DNS-only egress | live, and initially not working at all |
-| K07 | DNS used as an exfiltration channel | egress scoped to CoreDNS rather than port 53 anywhere | live, never tested |
+| K01 insecure workload configuration | Privileged or root containers | Pod Security Standards `restricted`, Kyverno in enforce | enforced, tested by violation |
+| K01 | Writable root filesystem | enforced read-only, with explicit volumes | enforced, tested |
+| K03 overly permissive RBAC | Pod identity reaching more than it needs | IRSA scoped by both subject and audience, one secret | enforced; the secret it scoped to was destroyed on 2026-09-06 |
+| K04 lack of centralised policy enforcement | Policy applied by convention | Kyverno cluster policies | enforced |
+| K06 broken authentication | Cluster API open to the internet | endpoint allow list now required | enforced |
+| K07 missing network segmentation | Lateral movement between pods | default-deny plus DNS-only egress | enforced, and initially not working at all |
+| K07 | DNS used as an exfiltration channel | egress scoped to CoreDNS rather than port 53 anywhere | enforced, never tested |
 | K08 secrets management failures | Credential readable by the wrong pod | Secrets Manager, access only through Secrets Manager; the customer-managed key was never applied | wound down 2026-09-06 with the secret |
-| K09 misconfigured logging | No record of cluster activity | control plane audit logs on | live, though inherited from a module default rather than chosen |
+| K09 misconfigured logging | No record of cluster activity | control plane audit logs on | enforced, though inherited from a module default rather than chosen |
 
 The K07 row is the honest one. Those policies existed and were enforced by nothing for the whole first attempt, because the VPC CNI does not act on NetworkPolicy objects unless told to. They were only found because the test tried to violate them instead of confirming they existed.
 
