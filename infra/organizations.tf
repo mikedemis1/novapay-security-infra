@@ -1,7 +1,6 @@
-# D1 Secure Landing Zone — step 1: enable AWS Organizations and lay out the
-# OU structure from ARCHITECTURE_D1.md (Option G). No member accounts yet —
-# that's a deliberately separate, explicitly-approved step (real AWS accounts
-# aren't cleanly reversible via `terraform destroy`).
+# D1 Secure Landing Zone — the organisation and its OU layout.
+# Member accounts are created separately in accounts.tf, because creating a
+# real AWS account is not cleanly reversible with terraform destroy.
 
 resource "aws_organizations_organization" "main" {
   # ALL (not CONSOLIDATED_BILLING) is required for Service Control Policies —
@@ -14,6 +13,9 @@ resource "aws_organizations_organization" "main" {
     "guardduty.amazonaws.com",
     "securityhub.amazonaws.com",
     "sso.amazonaws.com",
+    # Organization-scope Access Analyzer (account_baseline.tf) needs trusted
+    # access before the analyzer can see past a single account.
+    "access-analyzer.amazonaws.com",
   ]
 
   enabled_policy_types = [
