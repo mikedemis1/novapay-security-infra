@@ -15,5 +15,26 @@ does not need cropping.
 | `2026-08-09-trivy-nginx-unprivileged.txt` | Image scan of the placeholder container: 105 findings, 2 critical, mostly in the Alpine base. Recorded rather than tidied up. | 2026-08-09 |
 | `2026-07-secrets-manager-applied.jpg` | Secret created and encrypted, from the console. | 2026-07 |
 
-Before adding anything: remove account identifiers, IAM user names and email
-addresses. The captures here have been through that already.
+## capture-after-apply.sh
+
+One command that produces the "after" half for every row the README marks live.
+Run it straight after the apply and before destroying anything:
+
+```
+./evidence/capture-after-apply.sh > evidence/$(date +%F)-post-apply.txt
+```
+
+Its sections are numbered to match the README table, so a section that failed is
+a claim with nothing behind it. Run against the estate before the hardening
+apply, exactly two commands fail, both from the account baseline that has not
+been applied yet, which is the intended behaviour: the script is a test of the
+claims, not a formality.
+
+Redaction is built in, so the output can be committed as it comes. Account ids
+become role labels rather than one uniform mask, because masking all three
+identically would destroy the thing most of these commands exist to prove.
+`<security-account>` next to a delegated administrator is evidence;
+three identical `<account-id>` strings are not.
+
+Before adding anything by hand: remove account identifiers, IAM user names and
+email addresses. The captures here have been through that already.
