@@ -2,6 +2,16 @@
 # Capture proof for every row the README marks live, so the estate can be
 # destroyed without those claims becoming unverifiable.
 #
+# Section headings ask rather than assert, deliberately. They used to state the
+# expected answer -- "GuardDuty administered from the Security account" -- and a
+# capture then reads as confirmation of its own assumption. The 2026-09-06 run
+# printed exactly that heading above output naming the management account, which
+# is how the discrepancy was finally noticed. A heading that asks cannot be
+# contradicted by its own output.
+#
+# Run from bash, not PowerShell, which cannot execute a .sh file and will leave
+# you an empty file and an error the redirect never caught.
+#
 # Run once, straight after the apply and before destroying anything:
 #
 #   ./evidence/capture-after-apply.sh > evidence/$(date +%F)-post-apply.txt
@@ -64,10 +74,10 @@ run aws organizations describe-organization
 run aws organizations list-accounts
 run aws organizations list-roots
 
-section "2. Service control policies: three of them, and where they attach"
+section "2. Service control policies: which exist, and what they attach to"
 run aws organizations list-policies --filter SERVICE_CONTROL_POLICY
 
-section "3. Organisation CloudTrail: multi-region, validated, customer-managed key"
+section "3. Organisation CloudTrail: settings, and what actually encrypts the objects"
 echo
 echo "# The claim that failed last time was encryption. A KmsKeyId here is"
 echo "# necessary but not sufficient: CloudTrail sets encryption on its own"
@@ -79,11 +89,11 @@ echo "# All trails in the account. A second trail outside Terraform is a known"
 echo "# gap, and this is where it shows up rather than in prose."
 run aws cloudtrail list-trails
 
-section "4. GuardDuty administered from the Security account"
+section "4. GuardDuty: which account administers it"
 run aws guardduty list-organization-admin-accounts --region "$REGION"
 run aws guardduty list-detectors --region "$REGION"
 
-section "5. Security Hub administered from the Security account"
+section "5. Security Hub: which account administers it"
 run aws securityhub list-organization-admin-accounts --region "$REGION"
 
 section "6. Account baseline: password policy, Access Analyzer, EBS, contacts"
@@ -92,7 +102,7 @@ run aws accessanalyzer list-analyzers --region "$REGION"
 run aws ec2 get-ebs-encryption-by-default --region "$REGION"
 run aws account get-alternate-contact --alternate-contact-type SECURITY
 
-section "7. KMS: both keys present, rotation on"
+section "7. KMS: which keys exist, and whether rotation is on"
 run aws kms list-aliases --region "$REGION"
 
 section "8. Terraform state bucket: versioned, public access blocked"

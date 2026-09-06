@@ -16,7 +16,7 @@ The AWS reference architecture goes further and splits Security into a Log Archi
 
 ## A transaction, and where it could go wrong
 
-There is no real transaction service yet, so this is the intended path rather than a live one. It is drawn because the control choices only make sense against it.
+There is no real transaction service yet, so this is the intended path rather than a live one. It is drawn because the control choices only make sense against it. Since the 2026-09-06 wind-down it is further from reality still: the web ACL, Secrets Manager and both detection services in this diagram no longer exist. What remains of it in AWS is the organisation trail.
 
 ```mermaid
 flowchart LR
@@ -42,7 +42,7 @@ Each hop is a place to lose control of the transaction, and each has one control
 | App identity | A compromised pod reading more than its own secret | IRSA role scoped to one secret ARN and one action |
 | App to data | Credential theft, then direct database access | database tier accepts 5432 only from the app tier, and has no egress rules at all |
 | App outbound | Exfiltration after a compromise | default-deny egress, DNS to CoreDNS only |
-| Everything | Nobody notices | organisation trail, GuardDuty, Security Hub, email |
+| Everything | Nobody notices | organisation trail, still running; GuardDuty, Security Hub and the alert email, all wound down 2026-09-06 |
 
 The database tier having no egress block at all is intentional and worth explaining, because it looks like an omission. Terraform's inline egress rules are authoritative: writing none removes the AWS default of allow-all-outbound rather than leaving it in place. A compromised database cannot open an outbound connection.
 
@@ -50,11 +50,32 @@ The database tier having no egress block at all is intentional and worth explain
 
 Service control policies do not grant anything. They set a ceiling that local IAM cannot raise, which is what makes them the answer to "the attacker got admin in that account".
 
-Three policies, attached at different levels because they answer different questions:
+Three policies are written, attached at different levels because they answer
+different questions. **One of the three is attached.** The list below is the
+design; `novapay-workloads-guardrails`, on the Workloads unit, is the estate:
 
 - **Base guardrails**, at the organisation root: an account may not leave the organisation or close itself.
 - **Security-service protection**, on both units: logging and detection may not be stopped, deleted, disconnected or narrowed. Narrowing is the part that matters. A trail that has been updated to record almost nothing still exists and still looks healthy.
 - **Region deny**, on both units: resources only in eu-west-1, with the global services excluded, because denying those by region locks an account out of IAM and Organizations with no way back in.
+
+**What is actually enforced**, read back from the organisation on 2026-09-06
+rather than from the code:
+
+| Sid | Actions | Attached to |
+|---|---|---|
+| `DenyTrailTampering` | `cloudtrail:StopLogging`, `cloudtrail:DeleteTrail` | Workloads unit |
+| `DenyGuardDutyTampering` | `guardduty:DeleteDetector`, `guardduty:DisassociateFromMasterAccount` | Workloads unit |
+| `DenyLeavingOrganization` | `organizations:LeaveOrganization` | Workloads unit |
+
+The Security unit carries only `FullAWSAccess`. So the account this design
+nominates to hold detection is the one account with no guardrail on it, and the
+region deny does not exist anywhere.
+
+Note what the narrowing bullet above argues, and then what the policy denies.
+The bullet is right that an updated trail is the dangerous case. The policy
+covers `StopLogging` and `DeleteTrail` and says nothing about `UpdateTrail`.
+That gap sat behind a `live` marker in `THREAT_MODEL.md` for weeks, because the
+document was checked against the Terraform rather than against the account.
 
 **The gap this design has.** None of it applies to the management account, which holds the organisation, the log bucket, the log key and the Terraform state. What protects that account is root MFA and its IAM configuration, and today it also contains administrator IAM users with long-lived keys that no scanner in this repository can see, because they were made in the console. Moving the log bucket and key into the Security account is the fix for half of it; the other half is operating through Identity Center rather than as an IAM user.
 
@@ -62,9 +83,13 @@ Three policies, attached at different levels because they answer different quest
 
 The organisation trail records every account into one bucket, with log-file validation so tampering is detectable and a customer-managed key so reading the bucket is not the same as reading the logs.
 
-GuardDuty and Security Hub are administered from the Security account. That placement is not cosmetic: findings aggregate in the administrator's account, and an EventBridge rule only matches events on its own account's bus. An alert rule left behind in the management account after moving the administrator keeps existing, keeps looking healthy, and never fires again.
+GuardDuty and Security Hub belong in the Security account. That placement is not cosmetic: findings aggregate in the administrator's account, and an EventBridge rule only matches events on its own account's bus. An alert rule left behind in the management account after moving the administrator keeps existing, keeps looking healthy, and never fires again.
 
-What is missing here is continuous verification. Security Hub is on with no standards enabled and no AWS Config behind it, so it relays GuardDuty findings and little else. Nothing currently tells you the landing zone has drifted from this description. That gap is real, and a manual review is what found the CloudTrail encryption problem described in the README.
+**They were never actually put there.** An earlier version of this document stated the placement as fact. It was not: both services ran from the management account for their entire life, which is the gap `docs/runbooks/move-detection-to-security-account.md` exists to close and which was never executed. The claim survived here for weeks because nothing checked a design document against an account. `evidence/2026-09-06-pre-winddown.txt` is what checking looks like — the section headings assert the Security account and the output underneath returns the management account, on the same page.
+
+**And as of 2026-09-06 neither service exists.** Both were wound down on cost grounds; `evidence/2026-09-06-post-winddown.txt` reads back no detectors, no administrator accounts, and an account not subscribed to Security Hub. So this section describes a design, not an estate. The organisation trail is the only part of it still running.
+
+Continuous verification was already the weak point before that. Security Hub ran with no standards enabled and no AWS Config behind it, so it relayed GuardDuty findings and little else. Now there is none at all: nothing tells you the landing zone has drifted from this description, and a manual review is what found both the CloudTrail encryption problem and the false claim two paragraphs above.
 
 ## Network
 
@@ -102,6 +127,8 @@ Kept current on purpose, because a design document that quietly diverges from th
 
 - The log bucket and its key are in the management account, not the Security account. The document above says why that is wrong and what the fix is.
 - The log bucket has versioning but no deny statement and no object lock, so deletion is prevented by IAM alone.
-- The web ACL is attached to nothing, because there is no load balancer.
+- The web ACL was attached to nothing, because there is no load balancer, and was destroyed on 2026-09-06 after billing 7.75 USD a month to protect nothing.
 - The database tier, the load balancer and the real transaction service do not exist.
-- Security Hub has no standards enabled.
+- Detection does not exist either. GuardDuty and Security Hub were wound down on 2026-09-06, so the diagram's path from the trail to an email stops at the trail.
+- Secrets Manager holds nothing; the secret was destroyed in the same wind-down, and it was never re-encrypted with a customer-managed key as this document assumes.
+- The organisation trail, its bucket and its key are the detection story that is still true. They stayed because they carry `prevent_destroy` and cost about a euro a month.
