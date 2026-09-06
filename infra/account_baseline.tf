@@ -60,6 +60,18 @@ resource "aws_iam_account_password_policy" "workloads" {
   max_password_age               = 90
 }
 
+resource "aws_iam_account_password_policy" "security" {
+  provider                       = aws.security
+  minimum_password_length        = 14
+  require_uppercase_characters   = true
+  require_lowercase_characters   = true
+  require_numbers                = true
+  require_symbols                = true
+  allow_users_to_change_password = true
+  password_reuse_prevention      = 24
+  max_password_age               = 90
+}
+
 # CIS 1.20. Organization scope means one analyzer in the management account
 # covers all three, instead of one per account. It reports resources reachable
 # from outside the organisation, so a bucket shared to a stranger surfaces
@@ -67,6 +79,12 @@ resource "aws_iam_account_password_policy" "workloads" {
 resource "aws_accessanalyzer_analyzer" "org" {
   analyzer_name = "novapay-org-external-access"
   type          = "ORGANIZATION"
+
+  # The trusted access this needs is granted by a service principal inside
+  # aws_organizations_organization.main, and no attribute of it is referenced
+  # here, so Terraform sees no edge to order the two. On a fresh apply
+  # CreateAnalyzer then runs first and AWS rejects the ORGANIZATION type.
+  depends_on = [aws_organizations_organization.main]
 }
 
 # CIS 2.2.1. Only Workloads runs EC2, and only when the cluster is up, but the

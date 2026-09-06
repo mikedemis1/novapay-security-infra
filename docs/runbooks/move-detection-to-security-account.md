@@ -66,6 +66,49 @@ This designates the Security account as delegated administrator for both service
 
 **4. Confirm the subscription.** AWS sends a confirmation email to the alert address. Until it is clicked the topic has a pending subscription and delivers nothing.
 
+## What the plan should destroy, and nothing else
+
+The plan for this change removes nine addresses. Read them against this list
+before typing yes. An address here that is missing, or one present that is not
+here, means the state is not what this runbook assumed.
+
+| Address | Why it goes |
+|---|---|
+| `aws_organizations_policy.workloads_guardrails` | replaced by three policies with different content and a different attachment point; not a rename, so no `moved` block applies |
+| `aws_organizations_policy_attachment.workloads_guardrails` | same |
+| `aws_guardduty_detector_feature.s3_data_events` | protection plans move to the organisation configuration; on a single detector they covered the management account only |
+| `aws_guardduty_detector_feature.ebs_malware_protection` | same |
+| `aws_iam_user.test` | replaced by an assumed role |
+| `aws_iam_access_key.test` | the long-lived key that role exists to remove |
+| `aws_iam_user_policy_attachment.test_read_only_d2` | attached to the user above |
+| `aws_iam_user_policy_attachment.test_deny_dangerous_actions` | attached to the user above |
+| `aws_wafv2_web_acl.novapay_waf` | moved to the workload stack, which is a separate state file; the platform stack drops it and `infra/workload` recreates it |
+
+The Web ACL is the only one that is an artefact of splitting the stacks rather
+than a deliberate replacement. `moved` blocks cannot help: they operate inside
+one state, and the two stacks keep separate state files. Destroying it costs
+nothing, because it has no `aws_wafv2_web_acl_association` and therefore no
+traffic passes through it. Moving it also puts it on the workload lifecycle, so
+it is destroyed with the cluster instead of billing while nothing runs.
+
+There is a gap of seconds between the old guardrail policy being detached and
+the new ones attaching, during which the Workloads unit is governed by no
+service control policy. In this account that is acceptable. It is written down
+because noticing it after the fact is worse than deciding it in advance.
+
+The Kubernetes and Helm resources are **not** in this list. The platform state
+holds none: the cluster is destroyed after each test, and its objects went with
+it. If `terraform state list` ever does show `kubernetes_*` or `helm_*` entries
+in the platform stack, stop. Those providers were removed from `infra/` in the
+split, and a plan will abort with "Provider configuration not present" before
+it can do anything about them.
+
+Confirm the assumption before you start:
+
+```
+terraform -chdir=infra state list | grep -E '^(kubernetes|helm|module\.eks)' && echo "STOP: read the paragraph above" || echo "clear"
+```
+
 ## Verification
 
 ```

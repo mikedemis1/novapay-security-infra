@@ -35,6 +35,13 @@ resource "aws_guardduty_detector" "security" {
 # everything it configures lives elsewhere.
 resource "aws_guardduty_organization_admin_account" "main" {
   admin_account_id = aws_organizations_account.security.id
+
+  # Nothing here references the Security detector, so without this Terraform
+  # is free to designate the administrator first. AWS creates a detector in an
+  # account the moment it becomes delegated administrator, and the explicit
+  # CreateDetector that follows is then rejected: a detector already exists.
+  # securityhub.tf carries the same edge for the same reason.
+  depends_on = [aws_guardduty_detector.security]
 }
 
 resource "aws_guardduty_organization_configuration" "main" {
