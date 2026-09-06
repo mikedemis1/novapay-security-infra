@@ -157,6 +157,16 @@ credentials behind is the wrong order to stop in.
 
 ## Step 3. Empty the log bucket by hand
 
+**Not run on 2026-09-06, and deliberately so.** The trail, its bucket and its key
+were kept, for the reason set out under the guards below, so there was nothing
+to empty. The step is left here because it is correct for anyone who does decide
+to remove them, and because the trap in it is real.
+
+Note the ordering, which the first draft had backwards: destroy the trail
+*before* emptying the bucket. A running organisation trail keeps writing, so a
+bucket emptied while it is still enabled is not empty by the time step 4 reaches
+it.
+
 **This step exists because step 4 fails without it.** No bucket in this stack
 sets `force_destroy`, and the log bucket is versioned, so Terraform cannot
 remove it while objects remain. Deleting the current objects is not enough
@@ -183,23 +193,21 @@ aws s3api delete-objects --bucket "$BUCKET" --delete file://markers.json
 Both calls cap at 1000 keys per request, so repeat them until
 `list-object-versions` comes back empty.
 
-## Step 4. Trail, log bucket, secret, keys and the detectors
+## Step 4. The secret and the application key
+
+What was actually run, after the trail and its key were kept:
 
 ```
 terraform destroy \
-  -target=aws_cloudtrail.org_trail \
-  -target=aws_s3_bucket_policy.cloudtrail_logs \
-  -target=aws_s3_bucket_public_access_block.cloudtrail_logs \
-  -target=aws_s3_bucket_server_side_encryption_configuration.cloudtrail_logs \
-  -target=aws_s3_bucket_versioning.cloudtrail_logs \
-  -target=aws_s3_bucket.cloudtrail_logs \
   -target=aws_secretsmanager_secret_version.db_credentials \
   -target=aws_secretsmanager_secret.db_credentials \
-  -target=aws_kms_alias.cloudtrail_logs \
-  -target=aws_kms_key.cloudtrail_logs \
   -target=aws_kms_alias.app_data \
   -target=aws_kms_key.app_data
 ```
+
+The wider version, taking the trail, the log bucket and its key as well, needs
+their `prevent_destroy` blocks removed from `cloudtrail.tf` and `kms.tf` first,
+and step 3 run in between. It saves about 1.20 USD a month. It was not run.
 
 If the GuardDuty detector features are still in state after step 1, add
 `-target=aws_guardduty_detector_feature.s3_data_events` and
@@ -209,6 +217,53 @@ usually takes them as dependencies of the detector, so check
 
 From here nothing watches the accounts. That is the intent, but note the date:
 "no findings" after this point is not the same claim as "no findings" before it.
+
+## What actually happened, 2026-09-06
+
+Two things went wrong in ways the plan did not predict, and both are ordering
+problems rather than mistakes in the target lists.
+
+**Delegated administrators must be dismantled before the services they
+administer.** Step 1 destroyed the web ACL and the IAM policies, then failed:
+
+```
+BadRequestException: The request is rejected. You must first disassociate
+your member accounts and delete invited member accounts.
+InvalidInputException: Cannot disable Security Hub on the Security Hub administrator
+```
+
+The fix is to destroy `aws_guardduty_organization_admin_account.main` and
+`aws_securityhub_organization_admin_account.main` first. A destroy plan pulls in
+dependents rather than dependencies, so targeting the two administrator
+registrations also picks up the two organisation configurations, which is what
+you want. Afterwards the detector and the hub each deleted in under a second,
+having previously spent five minutes failing.
+
+That also settles the branch question above: the organisation configurations
+carry `provider = aws.security` and were expected to need the tag. They did not.
+A destroy does not need a successful refresh, so step 5 is largely redundant.
+
+**One resource genuinely could not be destroyed through the provider.**
+`aws_securityhub_organization_configuration.main` failed with:
+
+```
+InvalidAccessException: Account <security> is not an administrator for this organization
+```
+
+Destroying it is an `UpdateOrganizationConfiguration` call rather than a delete,
+and the configured provider is the Security account, which is not the
+administrator. It was dropped from state instead:
+
+```
+terraform state rm aws_securityhub_organization_configuration.main
+```
+
+That is worth naming as a decision rather than leaving in the shell history. A
+`state rm` abandons a real object to no owner, which is normally how estates rot.
+It is defensible here on two grounds: the object is an auto-enable setting that
+ceases to exist once the hub is disabled, which happened minutes later, and this
+stack is never applied again, so there is no future plan for the orphan to
+surprise. Neither ground would hold on a stack still in use.
 
 ## Step 5, optional. The free remainder
 
@@ -285,8 +340,30 @@ The account baseline and Access Analyzer are absent from both tables on purpose.
 They are free, but they were never applied, so there is nothing to keep or
 remove. They stay `written` in the README either way.
 
-The state bucket carries no `prevent_destroy`. Nothing but this sentence stops a
-future untargeted `terraform destroy` from taking the state with it.
+An earlier draft of this runbook said the state bucket carried no
+`prevent_destroy` and that nothing but a sentence protected it. That was wrong,
+and wrong in the safe direction. `main` carries six guards, none of which
+existed at the tag, because all six were added in PR #1:
+
+| Guarded | File |
+|---|---|
+| `aws_organizations_account.security` | `accounts.tf` |
+| `aws_organizations_account.workloads` | `accounts.tf` |
+| `aws_s3_bucket.cloudtrail_logs` | `cloudtrail.tf` |
+| `aws_cloudtrail.org_trail` | `cloudtrail.tf` |
+| `aws_kms_key.cloudtrail_logs` | `kms.tf` |
+| `aws_s3_bucket.tfstate` | `state_backend.tf` |
+
+The mistake came from grepping the tag, which is the right ref for state
+addresses and the wrong one for configuration. Two different questions, two
+different refs.
+
+The guards worked. Step 4 stopped on `Instance cannot be destroyed`, which
+forced the question of whether the organisation trail was worth keeping instead
+of letting it go by momentum. It costs about a euro a month and it is the one
+control in this estate nobody would switch off, so it stayed, and with it the
+log bucket and its key. Removing a `prevent_destroy` is a code change and a
+review, which is exactly the gate it exists to be.
 
 ## After
 
