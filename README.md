@@ -8,24 +8,38 @@ This is a lab built to learn on, applied against real AWS accounts and torn down
 
 ## What is actually running
 
+Two kinds of row, because they are two different claims. `live` means it exists in
+AWS right now. `written` means the Terraform is in this repository and passes
+`validate`, `fmt` and the policy suite, but no `apply` has put it into an
+account yet. The second group is the work of the current hardening branch.
+
 | Control | State |
 |---|---|
 | AWS Organizations, three accounts, two organisational units | live |
-| Service control policies: base guardrails at the root, security-service protection and region deny on both units | live |
-| Organisation CloudTrail, multi-region, log-file validation, customer-managed key | live |
-| GuardDuty and Security Hub, administered from the Security account | live |
-| S3 and malware protection enabled organisation-wide | live |
+| Organisation CloudTrail, multi-region, log-file validation | live |
+| CloudTrail encrypted with a customer-managed key | written, not applied |
+| Service control policy: workload guardrails on the Workloads unit | live |
+| Service control policies: base guardrails at the root, security-service protection and region deny on both units | written, not applied |
+| GuardDuty and Security Hub, enabled organisation-wide | live, administered from the management account |
+| GuardDuty and Security Hub, administered from the Security account | written, not applied |
+| S3 protection and malware protection, enabled through organisation configuration | written, not applied |
 | IAM Identity Center with an administrator permission set | live |
-| HIGH and CRITICAL findings emailed through EventBridge and SNS | live |
-| Account baseline: public access block, password policy, Access Analyzer, EBS encryption, security contact | live |
+| HIGH and CRITICAL findings emailed through EventBridge and SNS | live, moves to the Security account with the detection change |
+| Account baseline: public access block, password policy, Access Analyzer, EBS encryption, security contact | written, not applied |
 | VPC across two availability zones, three subnet tiers, chained security groups | live |
 | Two customer-managed KMS keys, both rotating | live |
-| Secrets Manager secret encrypted with a customer-managed key | live |
+| Secrets Manager secret encrypted with a customer-managed key | written, not applied |
 | Terraform state in S3, versioned, locked, public access blocked | live |
-| Compliance pipeline on every pull request | live |
+| Compliance pipeline on every pull request | written, has not run on GitHub yet |
 | EKS cluster, IRSA, Kyverno, Pod Security Standards, network policies | built and tested, destroyed after each test |
 | Web ACL, managed rule groups in count mode | defined, not attached, not running |
 | Backup and restore with a tested restore | not built, see limits |
+
+The written rows are not a wish list. They are the fixes for problems a review
+found in what was already live, and the reason they are not applied yet is that
+moving detection between accounts cannot be done in one step: see
+`docs/runbooks/move-detection-to-security-account.md`. Applying them is the next
+change to this repository, and this table moves with it.
 
 ## Architecture
 
@@ -63,6 +77,8 @@ flowchart TB
 ```
 
 Service control policies do not apply to the management account. That is the single most important thing to understand about this diagram, and it is why detection and alerting live in the Security account rather than next to the organisation.
+
+The diagram is the design as this repository defines it. The detection block sits in the Security account here; in AWS today it is still in the management account, which is the gap the table above marks as written and not applied.
 
 ## What broke
 
