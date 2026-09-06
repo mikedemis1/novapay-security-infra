@@ -406,3 +406,13 @@ The line between commit-pinned and tag-pinned is about who is trusted not to mov
 **Alternative rejected:** pinning everything, including `actions/checkout`. It would mean a commit bump every time GitHub patches its own action, and the maintenance falls off first in exactly the repositories that need it.
 
 **Note for the next run:** the checkov action installs its own checkov, which is not necessarily the 3.3.8 that produced the local clean result. The findings may differ from the local run for that reason alone.
+
+**Correction, same day.** The first pin was taken from the releases API and was wrong. `bridgecrewio/checkov-action` tags on every checkov build and marks a release far less often, so "latest release" resolved to v12.1347.0, an action declaring 17 inputs where the current tag declares 46. It was missing `output_file_path` and the comma-separated `output_format` this workflow passes, and the job died in 34 seconds on an argument the old action no longer understood, having never reached a scan.
+
+The lesson is narrow and worth keeping: pinning is only as good as the reference you pin to, and the obvious lookup was the wrong one. Resolve the newest *tag*, which needs no API and no token:
+
+```
+git ls-remote --tags https://github.com/bridgecrewio/checkov-action
+```
+
+The suggested fix at the time was to change `output_format` to a single value to match the old action. That would have worked, and it would have quietly frozen the pipeline on a stale action to accommodate a mistake in the pin. The configuration was correct all along; the pin was not.

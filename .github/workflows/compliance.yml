@@ -75,7 +75,15 @@ jobs:
         # starts, which hands a third party arbitrary execution inside this
         # pipeline. That is the supply-chain shape the pipeline exists to catch
         # in Terraform, and it was sitting in the pipeline itself.
-        uses: bridgecrewio/checkov-action@99bb2caf247dfd9f03cf984373bc6043d4e32ebf # v12.1347.0
+        #
+        # Take the SHA from the newest *tag*, not from the releases API. This
+        # repository tags on every checkov build and marks a release far less
+        # often, so "latest release" resolved to v12.1347.0: an action with 17
+        # inputs where the current one has 46, missing output_file_path and
+        # the comma-separated output_format this step passes. It failed in 34
+        # seconds on an argument it no longer understood.
+        #   git ls-remote --tags https://github.com/bridgecrewio/checkov-action
+        uses: bridgecrewio/checkov-action@f967808197a8d784d3e72919f38c3ff0cda7884e # v12.3122.0
         with:
           directory: .
           framework: terraform
