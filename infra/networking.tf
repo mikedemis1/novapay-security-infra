@@ -1,4 +1,5 @@
 resource "aws_vpc" "main" {
+  #checkov:skip=CKV2_AWS_11:Real gap, not a false positive. Flow logs answer "what talked to what" and nothing else here does. Delivering them means a cross-account write from Workloads into the management-account log bucket, which needs its bucket policy widened, and that policy is the one thing standing between this estate and a tampered audit trail. Widening it is a decision of its own, not a checkbox. Listed under limits in README.md.
   provider   = aws.workloads
   cidr_block = "10.0.0.0/16"
 
@@ -18,6 +19,7 @@ resource "aws_internet_gateway" "main" {
 
 # Public subnets (load balancer) — routed to the internet gateway
 resource "aws_subnet" "public_a" {
+  #checkov:skip=CKV_AWS_130:map_public_ip_on_launch is what makes a subnet public, and this tier exists to hold the load balancer and NAT. Turning it off would not harden the design, it would break the only route out of the private tiers. The private tiers are separate resources and do not set it.
   provider                = aws.workloads
   vpc_id                  = aws_vpc.main.id
   cidr_block              = "10.0.0.0/19"
@@ -30,6 +32,7 @@ resource "aws_subnet" "public_a" {
 }
 
 resource "aws_subnet" "public_b" {
+  #checkov:skip=CKV_AWS_130:map_public_ip_on_launch is what makes a subnet public, and this tier exists to hold the load balancer and NAT. Turning it off would not harden the design, it would break the only route out of the private tiers. The private tiers are separate resources and do not set it.
   provider                = aws.workloads
   vpc_id                  = aws_vpc.main.id
   cidr_block              = "10.0.32.0/19"

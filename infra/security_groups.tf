@@ -15,6 +15,8 @@ resource "aws_default_security_group" "main" {
 # Each tier only accepts traffic from the tier directly in front of it.
 
 resource "aws_security_group" "lb" {
+  #checkov:skip=CKV2_AWS_5:Attached to the EKS cluster and its load balancer, which live in the workload stack and are destroyed after each test. Checkov reads one stack at a time, so it sees a group with nothing to attach to whenever the cluster is down, which is most of the time.
+  #checkov:skip=CKV_AWS_382:Egress to 0.0.0.0/0 is deliberate. This tier pulls container images and reaches AWS APIs; pinning egress to CIDRs would mean tracking the address ranges of ECR, S3 and STS by hand. The control that does the work here is chained ingress: each tier accepts traffic only from the security group above it.
   provider    = aws.workloads
   name        = "novapay-lb-sg"
   description = "Load balancer: accepts HTTPS from the internet"
@@ -42,6 +44,8 @@ resource "aws_security_group" "lb" {
 }
 
 resource "aws_security_group" "app" {
+  #checkov:skip=CKV2_AWS_5:Attached to the EKS cluster and its load balancer, which live in the workload stack and are destroyed after each test. Checkov reads one stack at a time, so it sees a group with nothing to attach to whenever the cluster is down, which is most of the time.
+  #checkov:skip=CKV_AWS_382:Egress to 0.0.0.0/0 is deliberate. This tier pulls container images and reaches AWS APIs; pinning egress to CIDRs would mean tracking the address ranges of ECR, S3 and STS by hand. The control that does the work here is chained ingress: each tier accepts traffic only from the security group above it.
   provider    = aws.workloads
   name        = "novapay-app-sg"
   description = "App servers: accept traffic only from the load balancer"
@@ -69,6 +73,7 @@ resource "aws_security_group" "app" {
 }
 
 resource "aws_security_group" "db" {
+  #checkov:skip=CKV2_AWS_5:Attached to the EKS cluster and its load balancer, which live in the workload stack and are destroyed after each test. Checkov reads one stack at a time, so it sees a group with nothing to attach to whenever the cluster is down, which is most of the time.
   provider    = aws.workloads
   name        = "novapay-db-sg"
   description = "Database: accept traffic only from app servers"

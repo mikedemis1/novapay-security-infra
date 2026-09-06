@@ -152,6 +152,8 @@ Stated plainly, because a lab that claims to be more than it is fails the first 
 - **The transaction service is a placeholder.** It is nginx. The interesting object is the set of controls around it, not the workload.
 - **The web ACL has never blocked anything.** Rules are in count mode and it is attached to nothing.
 - **The log bucket and its key live in the management account**, not a dedicated log archive account. That is a deliberate simplification of the AWS reference architecture at this scale, and it means the logs sit in the one account service control policies cannot govern.
+- **No VPC flow logs.** Nothing here records which address talked to which. Delivering them means a cross-account write into the management-account log bucket, which means widening the bucket policy that protects the audit trail, and that is a decision rather than an attribute. It is the largest single gap in what this estate can reconstruct after an incident.
+- **The state bucket is encrypted with SSE-S3, not a customer-managed key.** State holds a generated database password in clear text, so this is a real weakness and not a stylistic one. It is deferred because a CMK on the state bucket is the one encryption change that can lock you out of your own state, and doing it safely is a runbook: create the key, grant access, prove a read, then switch the bucket default.
 - **One root account still lacks MFA.** Tracked, not forgotten.
 
 ## Layout

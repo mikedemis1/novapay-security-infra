@@ -13,6 +13,7 @@
 # would not block anything even if something reached it.
 
 resource "aws_wafv2_web_acl" "novapay_waf" {
+  #checkov:skip=CKV2_AWS_31:Logging a Web ACL that is not associated with anything records nothing, because no request reaches it. This ACL runs its managed rule groups in count mode and is attached to no resource; see README.md. Logging goes in with the association, and both are on the list for when a real listener exists.
   name  = "novapay-waf"
   scope = "REGIONAL"
 

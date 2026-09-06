@@ -363,3 +363,30 @@ Four of the eight are not defects, so gating first would mean writing four suppr
 **Alternative rejected:** dropping trivy. The brief asks for a second opinion after checkov, and it is producing two findings worth acting on. A scanner that reports without blocking is still worth having; a scanner everyone has learned to override is not.
 
 **Next:** fix AWS-0095 and AWS-0132, write justified `.trivyignore` entries for the other six, then move the column to yes. Until then the table does not overstate what the pipeline does.
+
+---
+
+## 2026-09-06 — Checkov triage: 6 fixed, 27 justified, 0 ignored
+
+**Decision:** Run the gate that was written but never executed, and resolve every finding it produced rather than lowering the bar to meet the result.
+
+**Why:** The compliance workflow gates on checkov, and checkov had never run. It returned 33 HIGH-and-above findings, so the first pull request would not have been a red mark to read at leisure; it would have blocked its own merge. That is worse than no gate, because the obvious way out under pressure is to weaken the gate.
+
+Fixed in code, six findings:
+
+| Finding | Change |
+|---|---|
+| CKV_K8S_8, CKV_K8S_9 | liveness and readiness probes on the deployment; without them a container that starts and fails to serve still counts as a healthy rollout |
+| CKV_K8S_43, CKV_K8S_15 | image pinned by digest with `imagePullPolicy: Always`; a tag is a moving pointer and the same manifest could deploy different bytes on different days |
+| CKV2_AWS_61 (×2) | lifecycle rules on the log and state buckets; both version every object and expired nothing, so a versioned org-wide trail bucket grew without bound |
+
+The remaining 27 carry an inline skip with the reason written next to the code, not in a central ignore file. A reason a reader has to go looking for is a reason nobody reads. Four groups:
+
+- **Checks whose premise does not hold here.** A KMS key policy's `Resource = "*"` is that key and cannot be written more narrowly (CKV_AWS_109, CKV_AWS_111, CKV_AWS_356, six findings). `map_public_ip_on_launch` is what makes a public subnet public (CKV_AWS_130). Security groups look unattached because the cluster they attach to is destroyed between tests and lives in the other stack (CKV2_AWS_5). GuardDuty's organisation configuration hangs off the Security account's detector, which is the arrangement this branch introduced (CKV2_AWS_3). Registry modules pin by version and lockfile checksum, not by commit hash (CKV_TF_1).
+- **Checks that would add a resource to satisfy a check that then fires on it.** S3 access logging needs a bucket that itself wants logging (CKV_AWS_18, ×2).
+- **Cost decisions, stated as such.** CloudWatch Logs delivery for an org-wide trail (CKV2_AWS_10), cross-region replication on the two largest buckets (CKV_AWS_144, ×2), event notifications with no consumer (CKV2_AWS_62, ×2), a delivery-notification SNS topic that would add noise to the topic carrying HIGH and CRITICAL (CKV_AWS_252), logging a web ACL that no request reaches (CKV2_AWS_31).
+- **Real gaps, deferred with the reason.** VPC flow logs, because delivery requires widening the bucket policy that protects the audit trail (CKV2_AWS_11). A customer-managed key on the state bucket, because that is the one encryption change that can lock you out of your own state (CKV_AWS_145). Both are now in the README limits, where a reader looking for weaknesses will find them.
+
+**Alternative rejected:** a central `.checkov.yaml` skip list. It is shorter and it separates each suppression from the code it excuses, which is how a suppression outlives the reason for it.
+
+**Result:** 232 passed, 0 failed, 30 skipped. Every skip has a sentence a reviewer can disagree with, which is the point.

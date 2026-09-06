@@ -22,6 +22,7 @@ moved {
 }
 
 resource "aws_guardduty_detector" "management" {
+  #checkov:skip=CKV2_AWS_3:The check looks for organisation configuration hanging off this detector. It hangs off the Security account's detector instead, because that account is the delegated administrator and organisation settings belong there. A detector in the management account that also configured the organisation is the arrangement this branch removed.
   enable = true
 }
 

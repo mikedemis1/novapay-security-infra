@@ -48,6 +48,9 @@ resource "aws_kms_alias" "cloudtrail_logs" {
 # the admin who'd actually investigate an incident — both scoped by
 # encryption context to this one trail, not a blanket grant.
 data "aws_iam_policy_document" "kms_cloudtrail_logs" {
+  #checkov:skip=CKV_AWS_109:A KMS key policy is attached to exactly one key, and inside it Resource = "*" means that key and nothing else. There is no narrower way to write it: naming the key ARN inside its own policy is not supported. The scoping here is done by principal and by kms:ViaService, which is where it belongs.
+  #checkov:skip=CKV_AWS_111:Same. The "*" is the key the policy is attached to.
+  #checkov:skip=CKV_AWS_356:Same. The "*" is the key the policy is attached to.
   statement {
     sid    = "AdminManageKey"
     effect = "Allow"
@@ -147,6 +150,9 @@ resource "aws_kms_alias" "app_data" {
 # delegated to IAM, but only through Secrets Manager, so a stolen role cannot
 # call Decrypt against this key directly.
 data "aws_iam_policy_document" "kms_app_data" {
+  #checkov:skip=CKV_AWS_109:A KMS key policy is attached to exactly one key, and inside it Resource = "*" means that key and nothing else. There is no narrower way to write it: naming the key ARN inside its own policy is not supported. The scoping here is done by principal and by kms:ViaService, which is where it belongs.
+  #checkov:skip=CKV_AWS_111:Same. The "*" is the key the policy is attached to.
+  #checkov:skip=CKV_AWS_356:Same. The "*" is the key the policy is attached to.
   statement {
     sid    = "AdminManageKey"
     effect = "Allow"
