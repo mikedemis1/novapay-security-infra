@@ -30,7 +30,7 @@ account yet. The second group is the work of the current hardening branch.
 | Two customer-managed KMS keys, both rotating | live |
 | Secrets Manager secret encrypted with a customer-managed key | written, not applied |
 | Terraform state in S3, versioned, locked, public access blocked | live |
-| Compliance pipeline on every pull request | written, has not run on GitHub yet |
+| Compliance pipeline on every pull request | live, both check runs green on PR #1 |
 | EKS cluster, IRSA, Kyverno, Pod Security Standards, network policies | built and tested, destroyed after each test |
 | Web ACL, managed rule groups in count mode | defined, not attached, not running |
 | Backup and restore with a tested restore | not built, see limits |

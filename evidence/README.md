@@ -10,6 +10,7 @@ does not need cropping.
 
 | File | Shows | Date |
 |---|---|---|
+| `2026-09-06-pipeline-first-github-run.txt` | The two check runs on the merge commit of PR #1, read back from the GitHub API. The pipeline had been written and run locally for weeks; this is the first proof it runs on GitHub, on a pull request, without AWS credentials. | 2026-09-06 |
 | `2026-09-06-landing-zone-baseline.txt` | The organisation trail writing SSE-S3 objects a month after the decision log recorded it as moved to a customer-managed key, and both delegated administrators still pointing at the management account. The before half of those fixes. | 2026-09-06 |
 | `2026-08-09-cluster-control-tests.md` | Five cluster controls tested by deliberate violation. Four blocked as intended; the network policies enforced nothing until the CNI was reconfigured. | 2026-08-09 |
 | `2026-08-09-trivy-nginx-unprivileged.txt` | Image scan of the placeholder container: 105 findings, 2 critical, mostly in the Alpine base. Recorded rather than tidied up. | 2026-08-09 |

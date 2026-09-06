@@ -1,0 +1,26 @@
+# Compliance pipeline, first run on GitHub
+
+Captured 2026-09-06. The README carried the row "written, has not run on
+GitHub yet" from the period before the repository had a pull request. PR #1
+ran it. This is the check-run status read back from the GitHub API for the
+merge commit, which is the claim the row now makes.
+
+$ curl -s https://api.github.com/repos/mikedemis1/novapay-security-infra/commits/794f1b6/check-runs
+
+total_count = 2
+
+name        : format and validate
+status      : completed
+conclusion  : success
+started_at  : 2026-09-06T14:17:46Z
+completed_at: 2026-09-06T14:18:17Z
+
+name        : scanners and policy
+status      : completed
+conclusion  : success
+started_at  : 2026-09-06T14:18:21Z
+completed_at: 2026-09-06T14:19:19Z
+
+Both jobs are defined in .github/workflows/. Neither needs AWS credentials,
+which is why they run on a pull request from a fork and why this row could
+become true without an apply.
