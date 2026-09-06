@@ -3,7 +3,41 @@
 # automatically starts logging any account added to the org later.
 
 resource "aws_s3_bucket" "cloudtrail_logs" {
+  #checkov:skip=CKV_AWS_18:Access logging on this bucket would need a second bucket, which the same check then wants logged, and so on. The reads worth catching here are API calls, and CloudTrail data events record those against the bucket directly. Not adding a bucket to satisfy a check that would immediately fire on the new one.
+  #checkov:skip=CKV_AWS_144:Cross-region replication doubles the storage bill of the bucket that grows fastest in this estate, against a failure mode (loss of an entire AWS region) that this lab does not otherwise design for. Versioning and MFA-less deletion protection cover the realistic case, which is a mistake rather than a region outage.
+  #checkov:skip=CKV2_AWS_62:Event notifications need something to notify. Nothing consumes object-created events on this bucket; findings reach the Security account through GuardDuty and EventBridge, which is the path that is actually wired up and tested.
   bucket = "novapay-cloudtrail-logs-${data.aws_caller_identity.current.account_id}"
+
+  # The whole point of this resource is to survive mistakes, including mine.
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# Versioning is on, so every overwritten object is kept forever unless
+# something expires it. For a bucket that receives org-wide CloudTrail this is
+# the difference between a fixed monthly cost and one that only goes up.
+# Current versions are kept: they are the audit record. Non-current ones are
+# an artefact of versioning, not evidence.
+resource "aws_s3_bucket_lifecycle_configuration" "cloudtrail_logs" {
+  bucket = aws_s3_bucket.cloudtrail_logs.id
+
+  rule {
+    id     = "expire-noncurrent-and-incomplete"
+    status = "Enabled"
+
+    filter {}
+
+    noncurrent_version_expiration {
+      noncurrent_days = 90
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+
+  depends_on = [aws_s3_bucket_versioning.cloudtrail_logs]
 }
 
 resource "aws_s3_bucket_versioning" "cloudtrail_logs" {
@@ -104,10 +138,23 @@ resource "aws_cloudtrail" "org_trail" {
   name           = local.org_trail_name
   s3_bucket_name = aws_s3_bucket.cloudtrail_logs.id
 
-  is_organization_trail         = true
-  is_multi_region_trail         = true
+  is_organization_trail = true
+  is_multi_region_trail = true
+  #checkov:skip=CKV2_AWS_10:CloudWatch Logs delivery bills per GB ingested on top of the S3 copy already being written, and an org-wide trail is the highest-volume source here. The queries it would enable are served by Athena over the bucket instead, at storage cost only. Revisit if real-time metric filters become the alerting path; today that path is GuardDuty to EventBridge.
+  #checkov:skip=CKV_AWS_252:The SNS topic on a trail notifies on log file delivery, not on anything security-relevant, and this estate already alerts on findings rather than on the fact that a log arrived. Wiring it would add noise to the one topic that currently only carries HIGH and CRITICAL.
   include_global_service_events = true
   enable_log_file_validation    = true
 
+  # Without this the trail encrypts with SSE-S3 regardless of what the bucket
+  # default says: CloudTrail sets the algorithm on its own PutObject, and the
+  # per-object choice wins over the bucket default. That is how the 2026-08-08
+  # "fix" silently did nothing for a month.
+  kms_key_id = aws_kms_key.cloudtrail_logs.arn
+
   depends_on = [aws_s3_bucket_policy.cloudtrail_logs]
+
+  # A destroy here stops the recording for every account at once.
+  lifecycle {
+    prevent_destroy = true
+  }
 }

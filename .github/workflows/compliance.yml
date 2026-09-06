@@ -1,0 +1,195 @@
+# Compliance gate.
+#
+# Everything here runs without AWS credentials, on purpose. A gate that needs
+# to reach the account it is guarding is a gate that fails open the day the
+# credentials expire, and it cannot run on a pull request from a fork.
+#
+# That constraint is why the policy checks read Terraform source rather than a
+# plan. It costs precision: a value that comes from a variable or a data source
+# is invisible to them, so these rules catch what is written down, and the
+# runtime state is Security Hub's job, not this file's.
+name: compliance
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Action pinning: third-party actions are pinned to a commit with the version
+# in a trailing comment. Actions published by GitHub and HashiCorp stay on
+# major tags, which is the usual line and keeps their security patches
+# arriving without a commit bump here. The line is drawn at who is trusted to
+# move a tag under you, not at whether pinning is nice to have.
+permissions:
+  contents: read
+  security-events: write
+
+env:
+  TF_VERSION: "1.10.5"
+
+jobs:
+  terraform:
+    name: format and validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive
+
+      # -backend=false is what makes this credential-free: it configures the
+      # providers and resolves the module tree without touching S3.
+      - name: terraform validate (platform)
+        run: |
+          terraform -chdir=infra init -backend=false -input=false
+          terraform -chdir=infra validate
+
+      - name: terraform validate (workload)
+        run: |
+          terraform -chdir=infra/workload init -backend=false -input=false
+          terraform -chdir=infra/workload validate
+
+  scan:
+    name: scanners and policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks scans history, not just the working tree. A secret removed
+          # in the tip commit is still a leaked secret.
+          fetch-depth: 0
+
+      # --download-external-modules matters more than it looks. Without it
+      # checkov skipped the entire EKS module, which is most of the resources
+      # in this repo, and still reported a clean-looking pass count.
+      - name: checkov
+        id: checkov
+        continue-on-error: true
+        # Pinned to a commit, not to master. An action referenced by a moving
+        # branch runs whatever that repository contains at the moment the job
+        # starts, which hands a third party arbitrary execution inside this
+        # pipeline. That is the supply-chain shape the pipeline exists to catch
+        # in Terraform, and it was sitting in the pipeline itself.
+        #
+        # Take the SHA from the newest *tag*, not from the releases API. This
+        # repository tags on every checkov build and marks a release far less
+        # often, so "latest release" resolved to v12.1347.0: an action with 17
+        # inputs where the current one has 46, missing output_file_path and
+        # the comma-separated output_format this step passes. It failed in 34
+        # seconds on an argument it no longer understood.
+        #   git ls-remote --tags https://github.com/bridgecrewio/checkov-action
+        uses: bridgecrewio/checkov-action@f967808197a8d784d3e72919f38c3ff0cda7884e # v12.3122.0
+        with:
+          directory: .
+          framework: terraform
+          download_external_modules: true
+          output_format: cli,sarif
+          output_file_path: console,checkov.sarif
+          # Twelve findings inside the vendored EKS module, none of them
+          # actionable and none of them in a file this repository can annotate.
+          # Four are on resources the module never creates with these inputs
+          # (self-managed node groups, the IPv6 CNI policy); three describe
+          # settings that are already correct but reach the resource through a
+          # variable checkov cannot resolve; the rest are decisions recorded in
+          # SECURITY_DECISIONS.md. The baseline names each one, so a new
+          # finding anywhere still fails the gate, and reviewing the accepted
+          # set means reading a committed file rather than trusting a flag.
+          baseline: .checkov.baseline
+
+      - name: trivy config
+        id: trivy
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          format: sarif
+          output: trivy.sarif
+          severity: HIGH,CRITICAL
+
+      - name: gitleaks
+        id: gitleaks
+        continue-on-error: true
+        run: |
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz" \
+            | tar -xz -C /usr/local/bin gitleaks
+          gitleaks detect --source . --redact --report-format sarif --report-path gitleaks.sarif
+
+      - name: conftest
+        id: conftest
+        continue-on-error: true
+        run: |
+          curl -sSL "https://github.com/open-policy-agent/conftest/releases/download/v0.56.0/conftest_0.56.0_Linux_x86_64.tar.gz" \
+            | tar -xz -C /usr/local/bin conftest
+          conftest test --parser hcl2 --policy policy --all-namespaces \
+            $(find infra -name '*.tf') | tee conftest.txt
+
+      # A policy suite that has only run against compliant code has not been
+      # tested. This fixture violates every rule on purpose.
+      #
+      # Counting matters. Asserting only that conftest exits non-zero passes as
+      # long as any single rule fires, so thirteen rules could quietly stop
+      # working and the step would stay green. The count is the assertion; when
+      # a rule or a fixture case is added, this number moves with it.
+      - name: policy self-test
+        env:
+          EXPECTED_FAILURES: 14
+        run: |
+          actual=$(conftest test --parser hcl2 --policy policy --all-namespaces             --output json policy/fixtures/violations.tf.fixture             | jq '[.[].failures[]] | length')
+          if [ "$actual" -ne "$EXPECTED_FAILURES" ]; then
+            echo "::error::fixture produced $actual denials, expected $EXPECTED_FAILURES; a rule stopped working or a case was added without updating the count"
+            exit 1
+          fi
+          echo "all $actual policy rules fire on known-bad input"
+
+      - name: upload sarif
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: .
+          category: iac
+
+      # The gate itself. Every scanner above runs to completion first, so one
+      # failure does not hide the others: a reviewer gets the whole picture in
+      # one run rather than fixing one finding per push.
+      - name: gate
+        if: always()
+        run: |
+          {
+            echo "## Compliance gate"
+            echo
+            echo "| check | result | blocks merge | evidences |"
+            echo "|---|---|---|---|"
+            echo "| checkov | ${{ steps.checkov.outcome }} | yes | AWS resource misconfiguration |"
+            echo "| trivy config | ${{ steps.trivy.outcome }} | no, advisory | second opinion, successor to tfsec |"
+            echo "| gitleaks | ${{ steps.gitleaks.outcome }} | yes | credentials in history |"
+            echo "| conftest | ${{ steps.conftest.outcome }} | yes | DORA Art. 9 and 10 policies in policy/ |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${{ steps.conftest.outcome }}" != "success" ]; then
+            echo "::error::policy check failed; see policy/README.md for what each rule evidences"
+            exit 1
+          fi
+          if [ "${{ steps.gitleaks.outcome }}" != "success" ]; then
+            echo "::error::gitleaks found a credential"
+            exit 1
+          fi
+          if [ "${{ steps.checkov.outcome }}" != "success" ]; then
+            echo "::error::checkov found a misconfiguration"
+            exit 1
+          fi
+
+          # trivy is deliberately not a gate yet. It currently reports eight
+          # HIGH/CRITICAL findings, four of them in the vendored EKS module and
+          # two that describe public subnets doing what public subnets do.
+          # Gating on it before that set is triaged would block every merge on
+          # findings nobody intends to act on, which is how a gate gets
+          # disabled entirely. The column above says which checks block, so
+          # reading the summary does not imply four gates where there are
+          # three. Findings still reach the Security tab through the SARIF
+          # upload. Tracked in SECURITY_DECISIONS.md.

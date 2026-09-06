@@ -27,6 +27,7 @@ resource "aws_ssoadmin_permission_set" "admin" {
 }
 
 resource "aws_ssoadmin_managed_policy_attachment" "admin" {
+  #checkov:skip=CKV_AWS_274:This is the break-glass administrator permission set for a one-person estate, and it replaced the IAM user with a long-lived access key that used to hold the same power with none of the session limits or the CloudTrail attribution. Narrowing it needs a second human to hold the emergency path, which does not exist here. Recorded in SECURITY_DECISIONS.md.
   instance_arn       = local.sso_instance_arn
   permission_set_arn = aws_ssoadmin_permission_set.admin.arn
   managed_policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"

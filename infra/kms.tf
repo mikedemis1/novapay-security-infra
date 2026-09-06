@@ -1,11 +1,11 @@
-# Renamed 2026-08-08 (D2->Workloads migration, SECURITY_DECISIONS.md): this
-# key started life as a generic "future transaction data" CMK but became
-# CloudTrail's real encryption key at the 2026-08-08 gap-analysis fix. Moving
-# D2 to the Workloads account meant deciding whether this key moves with it —
-# it doesn't: CloudTrail's trail lives in the Management account and a
-# security landing zone's log-encryption key must not be owned by the
-# account it's auditing (AWS SRA guidance). Renamed in place (no destroy) to
-# reflect its actual, sole job now.
+# Renamed in place (no destroy) when this key stopped being a generic
+# "future transaction data" CMK and became the trail's key. The rename used a
+# moved block so the already-encrypted log objects were never rewritten.
+#
+# Placement is a known compromise, not the target: the key sits in the same
+# account as the trail it protects, and that account is itself audited by the
+# trail and exempt from every SCP. The AWS SRA puts log keys in the Log
+# Archive account for exactly that reason. Recorded rather than hidden.
 moved {
   from = aws_kms_key.transactions
   to   = aws_kms_key.cloudtrail_logs
@@ -24,6 +24,12 @@ resource "aws_kms_key" "cloudtrail_logs" {
   deletion_window_in_days = 7
   enable_key_rotation     = true
   policy                  = data.aws_iam_policy_document.kms_cloudtrail_logs.json
+
+  # The whole point of this resource is to survive mistakes, including mine. Losing it makes
+  # every log object already written unreadable.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_kms_alias" "cloudtrail_logs" {
@@ -42,6 +48,9 @@ resource "aws_kms_alias" "cloudtrail_logs" {
 # the admin who'd actually investigate an incident — both scoped by
 # encryption context to this one trail, not a blanket grant.
 data "aws_iam_policy_document" "kms_cloudtrail_logs" {
+  #checkov:skip=CKV_AWS_109:A KMS key policy is attached to exactly one key, and inside it Resource = "*" means that key and nothing else. There is no narrower way to write it: naming the key ARN inside its own policy is not supported. The scoping here is done by principal and by kms:ViaService, which is where it belongs.
+  #checkov:skip=CKV_AWS_111:Same. The "*" is the key the policy is attached to.
+  #checkov:skip=CKV_AWS_356:Same. The "*" is the key the policy is attached to.
   statement {
     sid    = "AdminManageKey"
     effect = "Allow"
@@ -75,7 +84,10 @@ data "aws_iam_policy_document" "kms_cloudtrail_logs" {
       type        = "Service"
       identifiers = ["cloudtrail.amazonaws.com"]
     }
-    actions   = ["kms:GenerateDataKey*"]
+    # Decrypt is needed only because the bucket sets bucket_key_enabled:
+    # CloudTrail has to read the bucket-level data key before it can write.
+    # Both actions stay bound to this one trail by encryption context.
+    actions   = ["kms:GenerateDataKey*", "kms:Decrypt"]
     resources = ["*"]
 
     condition {
@@ -134,10 +146,13 @@ resource "aws_kms_alias" "app_data" {
   target_key_id = aws_kms_key.app_data.key_id
 }
 
-# Admin (root of the Workloads account) gets management actions only — no
-# kms:Encrypt/Decrypt/GenerateDataKey for bulk application data until a real
-# app role needs it, same reasoning as the CloudTrail key above.
+# Admin (root of the Workloads account) gets management actions only. Usage is
+# delegated to IAM, but only through Secrets Manager, so a stolen role cannot
+# call Decrypt against this key directly.
 data "aws_iam_policy_document" "kms_app_data" {
+  #checkov:skip=CKV_AWS_109:A KMS key policy is attached to exactly one key, and inside it Resource = "*" means that key and nothing else. There is no narrower way to write it: naming the key ARN inside its own policy is not supported. The scoping here is done by principal and by kms:ViaService, which is where it belongs.
+  #checkov:skip=CKV_AWS_111:Same. The "*" is the key the policy is attached to.
+  #checkov:skip=CKV_AWS_356:Same. The "*" is the key the policy is attached to.
   statement {
     sid    = "AdminManageKey"
     effect = "Allow"
@@ -162,5 +177,27 @@ data "aws_iam_policy_document" "kms_app_data" {
       "kms:UpdateKeyDescription",
     ]
     resources = ["*"]
+  }
+
+  # The consumer is the IRSA role in eks.tf, which is granted
+  # secretsmanager:GetSecretValue plus kms:Decrypt on this key. The condition
+  # is what keeps that grant narrow: IAM decides who, this decides through
+  # what. Repeating the condition on the role's own policy would add nothing,
+  # since both policies must allow the call.
+  statement {
+    sid    = "AllowUseOnlyThroughSecretsManager"
+    effect = "Allow"
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::${data.aws_caller_identity.workloads.account_id}:root"]
+    }
+    actions   = ["kms:Decrypt", "kms:GenerateDataKey*", "kms:DescribeKey"]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["secretsmanager.eu-west-1.amazonaws.com"]
+    }
   }
 }

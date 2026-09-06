@@ -5,17 +5,20 @@ resource "random_password" "db_credentials" {
   special = true
 }
 
-# Uses the AWS-managed key (aws/secretsmanager), not novapay-transaction-key:
-# the CMK grants zero kms:Encrypt/Decrypt/GenerateDataKey to any principal by
-# design (kms.tf), and widening it now just to unblock this secret would
-# undercut that least-privilege decision for no real consumer yet. Revisit
-# once a real app role needs both the CMK and this secret. See
-# SECURITY_DECISIONS.md 2026-07-17.
-#checkov:skip=CKV_AWS_149:Deliberate, see SECURITY_DECISIONS.md 2026-07-17, revisit at D3 when a real IAM role consumes this secret
+# Encrypted with novapay-transaction-key rather than aws/secretsmanager. The
+# CMK grants no usage actions to anyone directly; it allows the account's
+# principals to use it only through Secrets Manager (kms:ViaService in
+# kms.tf), so reading this secret is the one thing the key can do.
 resource "aws_secretsmanager_secret" "db_credentials" {
   provider                = aws.workloads
   name                    = "novapay/db-credentials"
   recovery_window_in_days = 7
+  kms_key_id              = aws_kms_key.app_data.arn
+
+  # checkov:skip=CKV2_AWS_57: there is no database to rotate against yet, so a
+  # rotation Lambda would rotate a value nothing reads. Revisit with the RDS
+  # instance. Note the placement: checkov only reads skip comments inside the
+  # resource block, which is why the earlier one above the block never applied.
 
   tags = {
     Name = "novapay-db-credentials"

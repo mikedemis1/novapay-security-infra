@@ -4,13 +4,15 @@
 # 2026-07-14, but here the billing is hourly not just "exists", so leaving
 # it running is a faster way to blow the 40 EUR/month cap).
 module "eks" {
-  source  = "terraform-aws-modules/eks/aws"
-  version = "~> 20.0"
+  #checkov:skip=CKV_TF_1:A commit hash is how you pin a module fetched from git. This one comes from the Terraform registry, where the equivalent is a version constraint plus the recorded checksum in .terraform.lock.hcl, which is committed. Rewriting the source as a git URL to satisfy the check would drop the registry's own signature verification.
+  source = "terraform-aws-modules/eks/aws"
 
-  providers = {
-    aws = aws.workloads
-  }
-
+  # Exact, not "~> 20.0". A floating constraint means the module can change
+  # under a build that touched nothing, and the compliance baseline below is
+  # keyed on the resolved commit, so a silent bump would expire it and fail
+  # the gate for no reason anyone could see. Bumping this is now a commit,
+  # which is where a dependency change belongs.
+  version      = "20.37.2"
   cluster_name = "novapay-eks"
   # 1.30 (the first guess) turned out to be past EKS standard AND extended
   # support already - `aws eks describe-cluster-versions` is ground truth,
@@ -20,7 +22,28 @@ module "eks" {
   # - re-run describe-cluster-versions before reusing this cluster later.
   cluster_version = "1.36"
 
-  cluster_endpoint_public_access = true
+  # The API endpoint was reachable from any address on the internet. IAM and
+  # RBAC still gated it, but "authentication is the only thing between the
+  # internet and the control plane" is a choice, and it had never been made
+  # explicitly: it is the module's default. Now it is a required input, so
+  # applying without deciding is not possible.
+  cluster_endpoint_public_access       = true
+  cluster_endpoint_public_access_cidrs = var.operator_cidrs
+
+  # On by default in the module, not by anything written here. Stated so that
+  # the answer to "which of these did you choose?" is not a guess.
+  cluster_endpoint_private_access = true
+
+  # All five, not the three that were here. controllerManager and scheduler
+  # are the two that show a workload being scheduled somewhere it should not
+  # be, which is the half of a compromise the audit log does not cover.
+  cluster_enabled_log_types = [
+    "api",
+    "audit",
+    "authenticator",
+    "controllerManager",
+    "scheduler",
+  ]
 
   # Without this, the identity running `terraform apply` (the assumed
   # OrganizationAccountAccessRole) gets no RBAC access to the cluster it
@@ -42,14 +65,14 @@ module "eks" {
     }
   }
 
-  vpc_id = aws_vpc.main.id
+  vpc_id = data.terraform_remote_state.platform.outputs.vpc_id
   # Control plane ENIs span both tiers; worker nodes (below) stay in the
   # private app subnets only, matching the app-tier pattern from D2.
   subnet_ids = [
-    aws_subnet.app_a.id,
-    aws_subnet.app_b.id,
-    aws_subnet.public_a.id,
-    aws_subnet.public_b.id,
+    local.app_subnet_ids[0],
+    local.app_subnet_ids[1],
+    local.public_subnet_ids[0],
+    local.public_subnet_ids[1],
   ]
 
   enable_irsa = true
@@ -60,7 +83,22 @@ module "eks" {
       min_size       = 1
       max_size       = 1
       desired_size   = 1
-      subnet_ids     = [aws_subnet.app_a.id, aws_subnet.app_b.id]
+      subnet_ids     = [local.app_subnet_ids[0], local.app_subnet_ids[1]]
+
+      # The module defaults this to 2, which is one hop more than the node
+      # itself needs and exactly the hop a container needs to reach the
+      # instance metadata service and read the node role's credentials. That
+      # is the standard escape from a compromised pod to the whole node.
+      #
+      # Safe to close here because enable_irsa is on: pods receive
+      # credentials through the OIDC provider, not through metadata, so
+      # nothing in this cluster depends on the extra hop. http_tokens is
+      # already "required" in the module, so IMDSv1 was never available.
+      metadata_options = {
+        http_endpoint               = "enabled"
+        http_tokens                 = "required"
+        http_put_response_hop_limit = 1
+      }
     }
   }
 
@@ -75,8 +113,6 @@ module "eks" {
 # to read exactly one secret (the D2 db-credentials secret) and nothing
 # else — ties D2 and D3 together instead of being a disconnected demo.
 data "aws_iam_policy_document" "app_irsa_trust" {
-  provider = aws.workloads
-
   statement {
     effect  = "Allow"
     actions = ["sts:AssumeRoleWithWebIdentity"]
@@ -101,29 +137,37 @@ data "aws_iam_policy_document" "app_irsa_trust" {
 }
 
 resource "aws_iam_role" "app_irsa" {
-  provider           = aws.workloads
   name               = "novapay-transaction-service-irsa"
   assume_role_policy = data.aws_iam_policy_document.app_irsa_trust.json
 }
 
 data "aws_iam_policy_document" "app_secret_read" {
-  provider = aws.workloads
-
   statement {
     effect    = "Allow"
     actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
-    resources = [aws_secretsmanager_secret.db_credentials.arn]
+    resources = [data.terraform_remote_state.platform.outputs.db_secret_arn]
+  }
+
+  # Reading a CMK-encrypted secret needs the key too. Scoping is handled by
+  # the key policy's kms:ViaService condition (kms.tf).
+  statement {
+    effect    = "Allow"
+    actions   = ["kms:Decrypt"]
+    resources = [data.terraform_remote_state.platform.outputs.app_data_kms_key_arn]
   }
 }
 
 resource "aws_iam_policy" "app_secret_read" {
-  provider = aws.workloads
-  name     = "novapay-transaction-service-secret-read"
-  policy   = data.aws_iam_policy_document.app_secret_read.json
+  name   = "novapay-transaction-service-secret-read"
+  policy = data.aws_iam_policy_document.app_secret_read.json
 }
 
 resource "aws_iam_role_policy_attachment" "app_irsa_secret_read" {
-  provider   = aws.workloads
   role       = aws_iam_role.app_irsa.name
   policy_arn = aws_iam_policy.app_secret_read.arn
+}
+
+variable "operator_cidrs" {
+  description = "Source ranges allowed to reach the EKS public API endpoint, in CIDR form. Deliberately has no default: a wide-open control plane should be a written decision, not an inherited one."
+  type        = list(string)
 }

@@ -76,6 +76,8 @@ Running log of architecture/security decisions and why they were made. Written i
 
 ## 2026-07-14 — WAF: code-complete in `infra/waf.tf`, not applied; rules in count mode
 
+**Status: partly superseded 2026-09-06.** The web ACL was applied at some point and left running, unattached, at roughly 8.89 USD a month. It now lives in the workload stack so it comes down with the cluster. Still count mode, still attached to nothing.
+
 **Decision:** The WAF web ACL and its 3 rules (`AWSManagedRulesCommonRuleSet`, rate-based limit=2000/IP/5min, `AWSManagedRulesAmazonIpReputationList`) are written and pass `terraform validate`/`fmt`, but are not applied to real AWS resources yet. All 3 rules use `count` mode (monitor-only), not `block`.
 
 **Why:** A WAF web ACL needs something to attach to (ALB/API Gateway/CloudFront) that doesn't exist yet in this project. Applying now would mean paying for an ALB (~$16/month) + WAF (~$5/month) before the rest of the reference architecture is ready to test against it, and before the rules have been observed against real traffic to confirm sane thresholds — both against the $40/month budget cap. Plan: apply everything together in a single test-day once enough of the architecture exists to exercise it, capture evidence (CloudWatch metrics/screenshots) with rules still in count mode, decide count→block per rule from what's actually observed, then destroy the same day.
@@ -98,13 +100,15 @@ Running log of architecture/security decisions and why they were made. Written i
 
 **Decision:** `novapay-transaction-key` (CMK, `aws_kms_key` with `deletion_window_in_days=7`, `enable_key_rotation=true`) + `aws_kms_alias` (`alias/novapay-transaction-key`) has a key policy with a single statement: principal = root account, actions limited to 11 management/read operations (`DescribeKey`, `GetKeyPolicy`, `PutKeyPolicy`, `EnableKeyRotation`, `DisableKeyRotation`, `ScheduleKeyDeletion`, `CancelKeyDeletion`, `TagResource`, `GetKeyRotationStatus`, `ListResourceTags`, `CreateAlias`). No usage actions (`Encrypt`, `Decrypt`, `GenerateDataKey`) are granted to any principal.
 
-**Why:** As of this decision, no application role, EC2/EKS instance, or data resource exists yet that would actually need to encrypt/decrypt data with this key — D3 (EKS Workload Security) and the data tier haven't started. Granting `Encrypt`/`Decrypt`/`GenerateDataKey` now would be an unused permission with no consumer, violating least-privilege for no benefit. The key exists now (ahead of its consumers) so that Secrets Manager (D2 ⑤, which depends on both IAM and KMS) can reference it next.
+**Why:** As of this decision, no application role, EC2/EKS instance, or data resource exists yet that would actually need to encrypt/decrypt data with this key — D3 (EKS Workload Security) and the data tier haven't started. Granting `Encrypt`/`Decrypt`/`GenerateDataKey` now would be an unused permission with no consumer, violating least-privilege for no benefit. The key exists now (ahead of its consumers) so that Secrets Manager (the corresponding deliverable, which depends on both IAM and KMS) can reference it next.
 
 **Note:** The test-user IAM principal used for live-testing D2 resources is deliberately excluded from the key policy — it has no business need to manage or use this key. Revisit the key policy to add scoped `Encrypt`/`Decrypt`/`GenerateDataKey` grants once a real principal (app role, Secrets Manager service integration) needs them — prefer condition-scoped grants over broad ones at that point.
 
 ---
 
 ## 2026-07-17 — Secrets Manager: AWS-managed key (`aws/secretsmanager`), not the CMK
+
+**Status: superseded 2026-09-06.** The revisit condition in this entry, a real consumer for the key, was met on 2026-08-09 and nothing followed. The secret now uses the customer-managed key.
 
 **Decision:** `infra/secrets.tf` creates `aws_secretsmanager_secret.db_credentials` (placeholder DB credentials for the future RDS instance — no RDS yet) without a `kms_key_id`, so it encrypts with the AWS-managed key `aws/secretsmanager`, not `novapay-transaction-key`.
 
@@ -120,9 +124,9 @@ Running log of architecture/security decisions and why they were made. Written i
 
 ---
 
-## 2026-07-18 — D2 ⑥ DR/backup scoped to Terraform state, not data tier
+## 2026-07-18 — the corresponding deliverable DR/backup scoped to Terraform state, not data tier
 
-**Decision:** D2 ⑥ ("DR/backup") is implemented now as a remote Terraform state backend (`infra/state_backend.tf` + `backend "s3"` in `providers.tf`): S3 bucket `novapay-tfstate-771665904432` with versioning, `AES256` default encryption (AWS-managed key, not the CMK), and full public access block; state locking via S3 native `use_lockfile = true` (Terraform 1.10+ feature) instead of a separate DynamoDB lock table. Data-tier backup (AWS Backup plan for the future RDS instance) is deliberately **not** implemented yet — no data resource exists to protect (D3 hasn't started).
+**Decision:** the corresponding deliverable ("DR/backup") is implemented now as a remote Terraform state backend (`infra/state_backend.tf` + `backend "s3"` in `providers.tf`): S3 bucket `novapay-tfstate-<management-account-id>` with versioning, `AES256` default encryption (AWS-managed key, not the CMK), and full public access block; state locking via S3 native `use_lockfile = true` (Terraform 1.10+ feature) instead of a separate DynamoDB lock table. Data-tier backup (AWS Backup plan for the future RDS instance) is deliberately **not** implemented yet — no data resource exists to protect (D3 hasn't started).
 
 **Why:** Evaluated against what a real company/team would require, not PoC-minimal defaults (standing decision, see below). Local Terraform state is a live risk today — no versioning (no rollback if a bad `apply` corrupts it), no locking (concurrent applies would corrupt it in a team setting), and it can leak resource ARNs/IAM policy JSON in plaintext if accidentally committed. This isn't a deferrable "nice-to-have" like the WAF (which waited for an ALB to attach to) — the state backend needs no other resource to exist first, so there's no reason to delay it. An AWS Backup plan for RDS, by contrast, would protect nothing yet and cost money for no benefit — correctly deferred to D3, same reasoning already applied to the WAF and the CMK's usage grants.
 
@@ -150,13 +154,15 @@ Running log of architecture/security decisions and why they were made. Written i
 
 ## 2026-08-08 — D2 infra stays in the Management account; migration to the real Workloads account deferred
 
+**Status: superseded the same day** by the migration entry below.
+
 **Context:** D1 created real `novapay-security` and `novapay-workloads` member accounts (see `ARCHITECTURE_D1.md`, Option Γ). All of D2 (VPC, WAF, KMS, Secrets Manager, IAM, state backend) was built earlier and still lives in the Management account — enabling AWS Organizations didn't move anything, it only added the org structure around the existing account.
 
 **Decision:** D2 infra is **not** migrated into the real Workloads account as part of D1. It stays where it is, and this is documented as a known, deliberate gap rather than an oversight.
 
 **Why:** There is no in-place "move" between AWS accounts — the only path is destroy the resources in the Management account and recreate them fresh in the Workloads account (new resource IDs, a new KMS key, re-running every D2 apply). That's a real rebuild cost for a change that doesn't alter any control's behavior, only which account it lives under — and there's no live workload or real data at stake yet that migration would actually protect. In a real company, keeping application infrastructure in the Management account long-term would be a genuine finding (the Management account should stay minimal — see `research/2026-07-28-senior-cloud-security-gap-analysis.md`); here it's accepted short-term so the cost of the rebuild is paid once, deliberately, later.
 
-**Revisit:** planned as a standalone step after the rest of P1, done by hand (not by Claude) as a deliberate exercise in cross-account resource migration — a real skill, worth doing hands-on rather than delegating.
+**Revisit:** planned as a standalone step after the rest of the phase, done by hand as an exercise in cross-account resource migration.
 
 ---
 
@@ -172,19 +178,23 @@ Running log of architecture/security decisions and why they were made. Written i
 
 ## 2026-08-08 — Root account MFA (all 3 accounts) deferred, not skipped
 
+**Status: two of three done.** Management and Security have root MFA; the Workloads account does not, and its root email is readable in public git history. Still open.
+
 **Context:** The same gap-analysis (finding #2) found none of the 3 accounts (Management, Security, Workloads) has MFA enabled on its root user — CIS AWS Foundations control #1. Root can't be scoped by IAM/SCPs the way every other principal can, so it's the highest-value target of the three; compromising the email tied to an account's root user is currently the softest path to full control of that account.
 
-**Decision:** Not implemented in this D1 session. Explicitly deferred, to be done by hand (root credential/MFA setup has no Terraform API — AWS deliberately keeps this console-only).
+**Decision:** Deferred, to be done by hand. Root credential and MFA setup has no Terraform API; AWS keeps it console-only.
 
-**Why:** Time-boxed session; doing it properly for 3 accounts (including first setting a root password on the 2 member accounts, which don't have one by default) is a real chunk of manual work on its own. Unlike #3 (an architecture trade-off that's arguably fine to leave permanently), this one has no "acceptable forever" version — it should get done soon, not treated as settled debt.
+**Why:** Doing it properly for 3 accounts (including first setting a root password on the 2 member accounts, which don't have one by default) is a real chunk of manual work on its own. Unlike #3 (an architecture trade-off that's arguably fine to leave permanently), this one has no "acceptable forever" version — it should get done soon, not treated as settled debt.
 
 ---
 
-## 2026-08-08 — D2→Workloads migration implemented by Claude (reverses the "done by hand" plan above); KMS key split; provider-reassignment orphan trap caught in `terraform plan`
+## 2026-08-08 — Workload infrastructure migrated to the Workloads account; KMS key split; provider-reassignment orphan trap caught in `terraform plan`
 
-**Context:** The 2026-08-08 entry above planned this migration as a manual exercise, done by the user later. The user asked Claude to implement it instead, in this same session.
+**Supersedes** the 2026-08-08 entry above, which planned this as a later manual exercise.
 
-**Decision 1 — how D2 moves:** Added a second `aws` provider alias (`aws.workloads`) in `providers.tf`, assuming `OrganizationAccountAccessRole` in the real Workloads account (`277606037083`) — the role Organizations creates automatically in every member account, assumable from Management with no extra IAM setup. Every D2 resource that belongs to a workload (VPC + subnets + route tables, the 3 security groups, the WAF ACL, the Secrets Manager secret, the test IAM user + its policies) got `provider = aws.workloads` added. Org-level resources (Organizations, the 2 accounts, the SCP, the org CloudTrail trail, the budget) stay on the default provider in Management — AWS requires this, it isn't a choice.
+**Context:** The entry above planned this migration as a later manual exercise. It was brought forward instead, because leaving workload infrastructure in the management account was the more expensive thing to defer.
+
+**Decision 1 — how D2 moves:** Added a second `aws` provider alias (`aws.workloads`) in `providers.tf`, assuming `OrganizationAccountAccessRole` in the real Workloads account — the role Organizations creates automatically in every member account, assumable from Management with no extra IAM setup. Every D2 resource that belongs to a workload (VPC + subnets + route tables, the 3 security groups, the WAF ACL, the Secrets Manager secret, the test IAM user + its policies) got `provider = aws.workloads` added. Org-level resources (Organizations, the 2 accounts, the SCP, the org CloudTrail trail, the budget) stay on the default provider in Management — AWS requires this, it isn't a choice.
 
 **Decision 2 — KMS key split:** `novapay-transaction-key` was encrypting the CloudTrail bucket (fixed 2026-08-08, same day as the migration-deferral entry above) but was labeled/intended as a future app-data key. Moving it wholesale to Workloads would make a security landing zone's audit-log encryption depend on a key owned by the account being audited — a separation-of-duties violation the AWS SRA specifically warns against. **Chosen: split into two keys.** The existing key stays in Management, renamed in-state via a `moved` block (`aws_kms_key.transactions` → `aws_kms_key.cloudtrail_logs`, alias → `alias/novapay-cloudtrail-key`) — no destroy, no re-encryption, zero risk to the CloudTrail logs it already protects. A brand-new key (`aws_kms_key.app_data`, alias `alias/novapay-transaction-key`) is created fresh in the Workloads account for future transaction data. Cost delta: ~$1/month for the second CMK.
 
@@ -222,4 +232,211 @@ Running log of architecture/security decisions and why they were made. Written i
 
 **Why squash-merge instead of `git filter-repo`:** the repo has been private for its entire existence — nothing was ever exposed to an external crawler, fork, or PR from another party. Deleting the branches removes them from every ref that GitHub or a clone would discover; the only theoretical residual risk is an unreachable dangling commit object being fetchable by someone who already knows its exact 40-character SHA, which nobody does. For a solo, previously-private repo, this is a legitimate, much lower-effort alternative to a full history rewrite, and it also finally merges D1 into `main` (a pending item since D1 was built).
 
-**Known, accepted residual gap:** the git **commit author email** (`mikedemis31@gmail.com`, the git config identity, not file content) appears on every commit across the whole repo, including commits already on `main` before this session. This is the Security account's root email — but that account already has root MFA enabled, so the practical risk is materially lower than the Workloads case above. Fixing this would require rewriting `main`'s entire history (`git filter-repo --mailmap` + force-push), changing every commit SHA and likely disrupting the GitHub contribution graph the user wants this repo to build. **Deliberately left as-is** (2026-08-09 decision) — revisit only if the Security account's MFA is ever removed or if the exposure turns out to matter in practice.
+**Known, accepted residual gap:** the git **commit author email** (the git config identity, not file content) appears on every commit across the whole repo, including commits made before the repository was public. This is the Security account's root email — but that account already has root MFA enabled, so the practical risk is materially lower than the Workloads case above. Fixing this would require rewriting `main`'s entire history (`git filter-repo --mailmap` + force-push), changing every commit SHA and breaking the contribution history. **Deliberately left as-is** (2026-08-09 decision) — revisit only if the Security account's MFA is ever removed or if the exposure turns out to matter in practice.
+
+---
+
+## 2026-09-06 — Correction: deleting the branches did not remove the leaked commits from GitHub
+
+**What the 2026-08-09 entry above assumed:** that deleting a branch makes its commits undiscoverable, and that the only residual risk was "an unreachable dangling commit object being fetchable by someone who already knows its exact 40-character SHA, which nobody does".
+
+**What is actually true:** deleting a ref removes the name, not the object. GitHub keeps unreachable commits reachable by SHA until its own garbage collection runs, and it does not run on demand. The SHAs are not private either: the unauthenticated events API lists every push and delete with its before/after SHA. Verified on 2026-09-06 by requesting a pre-cleanup commit through the commits API, through `raw.githubusercontent.com` and through the web UI. All three returned the file, including the account root email the cleanup was meant to remove.
+
+**Consequences.** The exposure the 2026-08-09 entry closed was never closed. The affected address belongs to the Workloads account, which is also the one account still without root MFA, so the two open items compound instead of being independent. Closing this needs a garbage-collection request to GitHub Support; no amount of local git work reaches those objects.
+
+**Why the mistake is worth keeping in the log:** the reasoning failed in a specific, repeatable way. A claim about an external system ("nobody can fetch it") was accepted without being tested against that system, in a project whose own standing rule is that a control counts only when something can prove it. The verification took one HTTP request.
+
+**Follow-up, in order:** root MFA on the Workloads account first, because it is immediate and unilateral. Then the Support request. Rotating the account root email is optional afterwards and only matters if the address itself is considered burned.
+
+---
+
+## 2026-09-06 — The organisation trail was never encrypted with the CMK
+
+**What was believed:** the 2026-08-08 gap analysis recorded that the trail had moved from SSE-S3 to `novapay-cloudtrail-key`. Two documents repeated it.
+
+**What was true:** only the bucket default encryption changed. CloudTrail sets the algorithm on its own `PutObject` call, and a per-object choice beats a bucket default, so every log object written between then and now is SSE-S3. `get-trail` returns no `KmsKeyId`; `head-object` on a live log object returns `AES256`. Both captured in `evidence/2026-09-06-landing-zone-baseline.txt`.
+
+**Decision:** set `kms_key_id` on the trail, and add `kms:Decrypt` to the CloudTrail statement in the key policy. Decrypt is required because the bucket has a bucket key, so the service reads the bucket-level data key before writing. Both service actions stay bound to this one trail by encryption context.
+
+**Why this is an entry and not a quiet fix:** the failure was not technical. A control was changed, recorded as done, and never checked against the thing it was meant to change. The check was one command, and it went a month without being run.
+
+---
+
+## 2026-09-06 — Detection administration moved to the Security account
+
+**Decision:** the Security account is the delegated administrator for GuardDuty and Security Hub, and the alerting pipeline moved with it.
+
+**Why:** AWS recommends against the management account holding this role, and the design document had always drawn it in the Security account. The code comments still read "no real Security account exists yet" four weeks after one existed.
+
+**The part that would have broken silently:** findings aggregate in the administrator's account, and an EventBridge rule only matches events on its own account's bus. Moving the administrator without moving the rule leaves a rule that still exists, still reports healthy, and never fires again.
+
+**Alternative rejected:** leave it, and document the placement as acceptable. Hard to defend when the fix is a provider alias and the design already claimed otherwise.
+
+**Cost:** none. **Blast radius:** the email subscription needs confirming again, and finding history in the old administrator is not carried over. It cannot be applied in one step, because changing a provider does not move a resource between accounts; see `docs/runbooks/move-detection-to-security-account.md`.
+
+---
+
+## 2026-09-06 — Protection plans were enabled on the wrong account
+
+**Decision:** S3 and malware protection are set through the organisation configuration with `auto_enable = ALL`, not on a single detector.
+
+**Why:** they were enabled on the management account's own detector, which has no application data and no EC2 instances, while the organisation configuration auto-enabled nothing. The features were on for the account that needed them least and off everywhere else. Enabling a feature on a detector and configuring the organisation are different operations, and the difference is easy to miss.
+
+---
+
+## 2026-09-06 — Service control policies split into three, and what they still cannot do
+
+**Decision:** one policy became three: base guardrails at the organisation root, security-service protection on both units, and a region deny on both units.
+
+**Why:** the original denied five actions on one unit. It missed closing an account, named only the retired GuardDuty disassociate action, said nothing about Security Hub or Config, and allowed a trail to be narrowed rather than deleted. The Security unit carried no policy at all, despite holding the detection services.
+
+**Narrowing over deleting:** `UpdateTrail` and `PutEventSelectors` turn a trail into one that records almost nothing while still existing and looking healthy on a dashboard. `DeleteTrail` is the loud version of the same attack, and the loud version is not the one to worry about.
+
+**Region deny:** makes the EU framing enforced rather than assumed, and turns "GuardDuty runs in one region only" from a hole into a scope decision. The global-service exclusion list is load-bearing: without it an account loses access to IAM and Organizations and cannot be recovered from inside.
+
+**Deliberately not implemented:** a deny on the member-account root user. Standard advice, but the Workloads account still has no root MFA and enabling it is a root console action. Denying root first would remove the only route to fixing it.
+
+**What none of this touches:** the management account. Service control policies do not apply there, and it holds the organisation, the log bucket, the log key and the state.
+
+---
+
+## 2026-09-06 — Cluster split into its own stack
+
+**Decision:** the cluster, its workload, the admission policies and the web ACL move to `infra/workload`, a separate root module with its own state.
+
+**Why:** `terraform plan` failed on a clean checkout whenever the cluster was down, which is nearly always, since it is destroyed after each test. Kubernetes manifests validate against the live cluster's schema during plan, and the provider is configured from an endpoint that does not exist yet. `depends_on` cannot help, because it orders apply and this fails before apply.
+
+**Alternatives considered:** a variable gating the cluster resources, which treats the symptom and leaves one stack owning two lifetimes; or replacing `kubernetes_manifest` with a provider that does not validate at plan time, which hides the problem rather than resolving it.
+
+**Free now, expensive later:** the cluster resources were not in state, because they had been destroyed. The same change after an apply would have meant moving state between backends.
+
+---
+
+## 2026-09-06 — Web ACL moved out of the always-on stack
+
+**Decision:** the web ACL lives in the cluster stack.
+
+**Why:** it is billed for existing, not for traffic. It was 8.89 USD of a 14.76 USD August bill, roughly 60 percent, while protecting nothing, because there is no load balancer to attach it to. In the platform stack it was permanently on. It now comes up and goes down with the thing it is meant to front.
+
+**Side effect:** the test role's deny on removing WAF protection matches any web ACL in the account by wildcard rather than one ARN, which also survives the ACL being recreated with a new id.
+
+---
+
+## 2026-09-06 — The policy-test IAM user became a role
+
+**Decision:** the IAM user and its Terraform-created access key are replaced by a role that is assumed. The two outputs exposing the key id and secret are gone.
+
+**Why:** the secret was written to Terraform state in plaintext, in a bucket in the management account, and to a Terraform output, in order to exercise deny policies that an assumed role exercises just as well. Roles hand out credentials that expire.
+
+---
+
+## 2026-09-06 — Compliance pipeline runs without AWS credentials
+
+**Decision:** the gate reads Terraform source rather than a plan, so it needs no access to the accounts it guards.
+
+**Why:** a gate that must reach the account fails open when credentials expire, and cannot run on a pull request from a fork. The cost is precision: a value arriving from a variable or a data source is invisible to a source-level rule. That limit is stated in `policy/README.md` rather than glossed over, and runtime conformance is Security Hub's job.
+
+**On tfsec:** the brief names Checkov and tfsec. tfsec entered maintenance mode in 2023 and its checks live on in Trivy, which is what runs here. Following the brief literally would have meant shipping a scanner that no longer receives rules.
+
+**On testing the policies:** the first version of the network rule passed a security group open on port 22 from anywhere. The HCL parser represents one `ingress` block as an object and several as a list, so iterating walked field values instead of rules. It would have started working by accident the day someone added a second block. A fixture that must fail is now part of the pipeline.
+
+---
+
+## 2026-09-06 — Trivy reports, it does not block
+
+**Decision:** Of the four checks in the compliance workflow, three block a merge: checkov, gitleaks and conftest. Trivy runs, uploads SARIF and is shown in the summary, but does not fail the build. The summary table now has a column saying so.
+
+**Why:** The defect was not that trivy did not gate. It was that the summary listed four checks in one table with no indication that only three of them stopped anything, so the run looked like four gates and was one short. A reviewer reading it would have drawn the wrong conclusion, which is the same failure as a policy rule that cannot fail.
+
+Making it gate today would fail every merge. `trivy config` currently returns eight HIGH/CRITICAL findings:
+
+| Finding | Where | Assessment |
+|---|---|---|
+| AWS-0095, SNS topic not encrypted | `alerting.tf` | real, one attribute, worth fixing |
+| AWS-0132, state bucket not using a CMK | `state_backend.tf` | real, needs a key and carries a monthly cost |
+| AWS-0164, subnet assigns public IPs (×2) | `networking.tf` | `map_public_ip_on_launch` is what makes a public subnet public |
+| AWS-0104, unrestricted egress (×2) | `security_groups.tf` | deliberate, and the chained ingress is where this design does its work |
+| AWS-0040 public endpoint, AWS-0104 node egress | vendored `terraform-aws-modules/eks` | upstream, not ours to change |
+
+Four of the eight are not defects, so gating first would mean writing four suppressions under deadline pressure to unblock a merge. Suppressions written that way are how a scanner stops being read at all.
+
+**Alternative rejected:** dropping trivy. The brief asks for a second opinion after checkov, and it is producing two findings worth acting on. A scanner that reports without blocking is still worth having; a scanner everyone has learned to override is not.
+
+**Next:** fix AWS-0095 and AWS-0132, write justified `.trivyignore` entries for the other six, then move the column to yes. Until then the table does not overstate what the pipeline does.
+
+---
+
+## 2026-09-06 — Checkov triage: 6 fixed, 27 justified, 0 ignored
+
+**Decision:** Run the gate that was written but never executed, and resolve every finding it produced rather than lowering the bar to meet the result.
+
+**Why:** The compliance workflow gates on checkov, and checkov had never run. It returned 33 HIGH-and-above findings, so the first pull request would not have been a red mark to read at leisure; it would have blocked its own merge. That is worse than no gate, because the obvious way out under pressure is to weaken the gate.
+
+Fixed in code, six findings:
+
+| Finding | Change |
+|---|---|
+| CKV_K8S_8, CKV_K8S_9 | liveness and readiness probes on the deployment; without them a container that starts and fails to serve still counts as a healthy rollout |
+| CKV_K8S_43, CKV_K8S_15 | image pinned by digest with `imagePullPolicy: Always`; a tag is a moving pointer and the same manifest could deploy different bytes on different days |
+| CKV2_AWS_61 (×2) | lifecycle rules on the log and state buckets; both version every object and expired nothing, so a versioned org-wide trail bucket grew without bound |
+
+The remaining 27 carry an inline skip with the reason written next to the code, not in a central ignore file. A reason a reader has to go looking for is a reason nobody reads. Four groups:
+
+- **Checks whose premise does not hold here.** A KMS key policy's `Resource = "*"` is that key and cannot be written more narrowly (CKV_AWS_109, CKV_AWS_111, CKV_AWS_356, six findings). `map_public_ip_on_launch` is what makes a public subnet public (CKV_AWS_130). Security groups look unattached because the cluster they attach to is destroyed between tests and lives in the other stack (CKV2_AWS_5). GuardDuty's organisation configuration hangs off the Security account's detector, which is the arrangement this branch introduced (CKV2_AWS_3). Registry modules pin by version and lockfile checksum, not by commit hash (CKV_TF_1).
+- **Checks that would add a resource to satisfy a check that then fires on it.** S3 access logging needs a bucket that itself wants logging (CKV_AWS_18, ×2).
+- **Cost decisions, stated as such.** CloudWatch Logs delivery for an org-wide trail (CKV2_AWS_10), cross-region replication on the two largest buckets (CKV_AWS_144, ×2), event notifications with no consumer (CKV2_AWS_62, ×2), a delivery-notification SNS topic that would add noise to the topic carrying HIGH and CRITICAL (CKV_AWS_252), logging a web ACL that no request reaches (CKV2_AWS_31).
+- **Real gaps, deferred with the reason.** VPC flow logs, because delivery requires widening the bucket policy that protects the audit trail (CKV2_AWS_11). A customer-managed key on the state bucket, because that is the one encryption change that can lock you out of your own state (CKV_AWS_145). Both are now in the README limits, where a reader looking for weaknesses will find them.
+
+**Alternative rejected:** a central `.checkov.yaml` skip list. It is shorter and it separates each suppression from the code it excuses, which is how a suppression outlives the reason for it.
+
+**Result:** 232 passed, 0 failed, 30 skipped. Every skip has a sentence a reviewer can disagree with, which is the point.
+
+---
+
+## 2026-09-06 — GitHub Actions pinned to commits, after the first CI run failed
+
+**Decision:** Third-party actions are pinned to a commit SHA with the version in a trailing comment. Actions published by GitHub and HashiCorp stay on major tags.
+
+**Why:** The first run of the pipeline failed before executing a single scanner: `aquasecurity/trivy-action@0.28.0` does not exist, and never did. The tag was wrong from the day it was written, and nothing caught it because the workflow had only ever been reasoned about, not run.
+
+Looking at the other actions to fix it turned up the larger problem. `bridgecrewio/checkov-action@master` was referenced by a moving branch, which means the job runs whatever that repository contains at the moment it starts. That is arbitrary code execution by a third party inside the pipeline, and it is the same supply-chain shape the pipeline flags in Terraform through CKV_TF_1. The gate had the defect it exists to catch.
+
+The line between commit-pinned and tag-pinned is about who is trusted not to move a tag under you, not about whether pinning is worth doing. GitHub and HashiCorp moving a major tag to ship a security patch is the behaviour you want; an arbitrary publisher doing it is the thing you are defending against.
+
+**Alternative rejected:** pinning everything, including `actions/checkout`. It would mean a commit bump every time GitHub patches its own action, and the maintenance falls off first in exactly the repositories that need it.
+
+**Note for the next run:** the checkov action installs its own checkov, which is not necessarily the 3.3.8 that produced the local clean result. The findings may differ from the local run for that reason alone.
+
+**Correction, same day.** The first pin was taken from the releases API and was wrong. `bridgecrewio/checkov-action` tags on every checkov build and marks a release far less often, so "latest release" resolved to v12.1347.0, an action declaring 17 inputs where the current tag declares 46. It was missing `output_file_path` and the comma-separated `output_format` this workflow passes, and the job died in 34 seconds on an argument the old action no longer understood, having never reached a scan.
+
+The lesson is narrow and worth keeping: pinning is only as good as the reference you pin to, and the obvious lookup was the wrong one. Resolve the newest *tag*, which needs no API and no token:
+
+```
+git ls-remote --tags https://github.com/bridgecrewio/checkov-action
+```
+
+The suggested fix at the time was to change `output_format` to a single value to match the old action. That would have worked, and it would have quietly frozen the pipeline on a stale action to accommodate a mistake in the pin. The configuration was correct all along; the pin was not.
+
+---
+
+## 2026-09-06 — A baseline for the vendored module, and why local runs were lying
+
+**Decision:** The EKS module is pinned to an exact version, `20.37.2`, and the twelve checkov findings inside it are recorded in a committed `.checkov.baseline`. Any finding that is not in that file still fails the gate.
+
+**Why a baseline and not a skip list:** none of the twelve can carry an inline `#checkov:skip`, because they are in files this repository does not own. The alternatives were a `skip_check` list of the eight check ids, which would also silence those checks if the same mistake ever appeared in our own Terraform, and a `skip_path` over `.external_modules`, which would stop scanning the module altogether. The module scan is what found the two real cluster gaps fixed in `da5dc92`, so switching it off to make the build green would have thrown away the thing that was working.
+
+A baseline names each finding by file, resource and check id. New findings still fail, including new findings in the module after a version bump, which is the behaviour you want from a dependency you did not write.
+
+**Why the exact version pin:** the constraint was `~> 20.0`. The baseline is keyed on the resolved commit, so a floating constraint would expire it during a build that changed nothing, and the gate would fail for a reason nobody could see in the diff. Bumping the module is now a commit, which is where a dependency change belongs.
+
+**The twelve, in three groups:**
+
+| Group | Findings |
+|---|---|
+| Resources the module never creates with these inputs. `self_managed_node_groups` is not set, so its `for_each` is empty; `create_cni_ipv6_iam_policy` defaults to false. Checkov does not evaluate `count` or `for_each`, so it checks code that never runs. | CKV_AWS_341, CKV_AWS_79 on the self-managed group; CKV_AWS_111, CKV_AWS_356 on the IPv6 CNI policy |
+| Settings already correct, reached through a variable checkov cannot resolve. `cluster_encryption_config` defaults to `{resources = ["secrets"]}` with `create_kms_key = true`; `http_tokens` is already `required`; the hop limit is set to 1 by this repository but read from the module's default of 2. | CKV_AWS_58, CKV_AWS_79, CKV_AWS_341 on the managed group |
+| Decisions recorded elsewhere: a public endpoint restricted to operator CIDRs, 90-day log retention on a cluster destroyed after every test, Kubernetes 1.36 against a stale supported-version list, and the module's own security group. | CKV_AWS_38, CKV_AWS_39, CKV_AWS_338, CKV_AWS_339, CKV2_AWS_5 |
+
+**The part worth remembering.** Checkov reported clean on this machine all day and it was not. `--download-external-modules` creates `.external_modules` and then downloads nothing here: the repository sits under a ~130 character OneDrive path, the module adds its own tree under a 40 character commit SHA, and Windows refuses at 260. Git says "Filename too long"; checkov says nothing and prints a pass count. That is the failure the comment in `compliance.yml` warns about, and it was happening in the very runs used to declare the code clean.
+
+Local checkov on Windows therefore under-reports, and the reproduction is to copy `infra/` to a short path and scan there. It is written down in `policy/README.md` because the next person to trust a green local run will be me.

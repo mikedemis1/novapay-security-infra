@@ -23,3 +23,8 @@ variable "security_alerts_email" {
   description = "Email address that receives HIGH/CRITICAL Security Hub finding alerts"
   type        = string
 }
+
+variable "security_contact_phone" {
+  description = "Phone number for the AWS account security alternate contact (E.164, e.g. +302101234567)"
+  type        = string
+}

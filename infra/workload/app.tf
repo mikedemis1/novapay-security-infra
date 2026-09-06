@@ -66,11 +66,40 @@ resource "kubernetes_deployment" "app" {
         }
 
         container {
-          name  = "app"
-          image = "nginxinc/nginx-unprivileged:1.27-alpine"
+          name = "app"
+
+          # Pinned by digest, not by the 1.27-alpine tag alone. A tag is a
+          # moving pointer: the same manifest text can deploy different bytes
+          # on different days, which makes an image nobody chose the thing
+          # actually running. The tag stays for readability; the digest is
+          # what is resolved. Update both together.
+          image             = "nginxinc/nginx-unprivileged:1.27-alpine@sha256:65e3e85dbaed8ba248841d9d58a899b6197106c23cb0ff1a132b7bfe0547e4c0"
+          image_pull_policy = "Always"
 
           port {
             container_port = 8080
+          }
+
+          # Without these the deployment reports Ready the moment the process
+          # starts, so a container that comes up and immediately fails to
+          # serve still counts as a healthy rollout. Readiness gates traffic;
+          # liveness restarts a process that is running but wedged.
+          readiness_probe {
+            http_get {
+              path = "/"
+              port = 8080
+            }
+            initial_delay_seconds = 3
+            period_seconds        = 10
+          }
+
+          liveness_probe {
+            http_get {
+              path = "/"
+              port = 8080
+            }
+            initial_delay_seconds = 10
+            period_seconds        = 20
           }
 
           # nginx needs to write here at runtime (cache temp files, pid
@@ -177,7 +206,26 @@ resource "kubernetes_network_policy" "allow_dns_egress" {
     pod_selector {}
     policy_types = ["Egress"]
 
+    # Scoped to CoreDNS rather than "port 53 anywhere". Without the selector
+    # this rule permits DNS to any destination, which is a working
+    # exfiltration channel: data goes out inside query names to a server the
+    # attacker controls, and the default-deny policy above never sees it
+    # because it is, technically, DNS. The August test only proved HTTPS was
+    # blocked, so this path was never exercised.
     egress {
+      to {
+        namespace_selector {
+          match_labels = {
+            "kubernetes.io/metadata.name" = "kube-system"
+          }
+        }
+        pod_selector {
+          match_labels = {
+            "k8s-app" = "kube-dns"
+          }
+        }
+      }
+
       ports {
         port     = 53
         protocol = "UDP"
