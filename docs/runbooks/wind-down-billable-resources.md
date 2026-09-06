@@ -90,17 +90,51 @@ empty file and sends the error somewhere the redirect does not capture. A
 zero-line capture looks exactly like a successful one until it is opened. Check
 the line count before continuing.
 
-## Step 1. The web ACL, which is most of the bill
+## Step 1. The web ACL, and the two renames that come with it
+
+The web ACL alone is roughly 7.75 USD a month, around 60 percent of the bill,
+attached to nothing. It has no `aws_wafv2_web_acl_association`, so no traffic
+passes through it and nothing depends on it going.
+
+It cannot go alone, though, and the reason is worth understanding because it
+governs every targeted command in this runbook.
+
+`main` carries four `moved` blocks. Two of them, renaming `aws_kms_key.transactions`
+to `aws_kms_key.cloudtrail_logs` and the matching alias, are already reflected in
+state and are inert. The other two are not:
 
 ```
-terraform destroy -target=aws_wafv2_web_acl.novapay_waf
+aws_guardduty_detector.main   ->  aws_guardduty_detector.management
+aws_securityhub_account.main  ->  aws_securityhub_account.management
 ```
 
-Roughly 7.75 USD a month, around 60 percent of the bill, attached to nothing. It
-has no `aws_wafv2_web_acl_association`, so no traffic passes through it and
-nothing depends on it going. It is absent from `main`'s configuration because it
-moved to the workload stack, so this is a state-only destroy and nothing else
-can be caught up in it. If only one step here ever gets run, this is the one.
+State still holds the old names, the configuration declares the new ones, and
+Terraform refuses to build a targeted plan that leaves a pending move only
+half covered:
+
+```
+Error: Moved resource instances excluded by targeting
+```
+
+That refusal is correct. A `moved` block is a promise about identity, and a plan
+that honoured it for some instances and not others would produce a state that
+matches neither. So both sides of both renames join this step. Both resources
+are being destroyed anyway, GuardDuty and Security Hub being the usage-billed
+half of detection, so nothing is lost by taking them here rather than in step 4.
+
+```
+terraform destroy \
+  -target=aws_wafv2_web_acl.novapay_waf \
+  -target=aws_guardduty_detector.main \
+  -target=aws_guardduty_detector.management \
+  -target=aws_securityhub_account.main \
+  -target=aws_securityhub_account.management
+```
+
+Terraform will pull in further instances to respect dependencies, and the
+GuardDuty detector features in state are the likely additions. **Read the plan
+before answering.** Every line must be a destroy; a single create means the
+targeting has caught something that was meant to stay.
 
 ## Step 2. The D2 test user and its long-lived access key
 
@@ -164,17 +198,14 @@ terraform destroy \
   -target=aws_kms_alias.cloudtrail_logs \
   -target=aws_kms_key.cloudtrail_logs \
   -target=aws_kms_alias.app_data \
-  -target=aws_kms_key.app_data \
-  -target=aws_guardduty_detector_feature.s3_data_events \
-  -target=aws_guardduty_detector_feature.ebs_malware_protection \
-  -target=aws_guardduty_detector.main \
-  -target=aws_securityhub_account.main
+  -target=aws_kms_key.app_data
 ```
 
-The last four are the usage-billed half of detection. If AWS refuses to delete
-the detector because the organisation configuration still references it, drop
-those four and take them in step 5 instead, where the whole detection group
-goes together and Terraform can order it from the dependency graph.
+If the GuardDuty detector features are still in state after step 1, add
+`-target=aws_guardduty_detector_feature.s3_data_events` and
+`-target=aws_guardduty_detector_feature.ebs_malware_protection` here. Step 1
+usually takes them as dependencies of the detector, so check
+`terraform state list` rather than assuming either way.
 
 From here nothing watches the accounts. That is the intent, but note the date:
 "no findings" after this point is not the same claim as "no findings" before it.
