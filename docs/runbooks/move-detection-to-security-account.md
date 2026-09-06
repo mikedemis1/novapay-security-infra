@@ -25,10 +25,18 @@ Moving the delegated administrator silently breaks alerting if the EventBridge r
 
 ## Steps
 
-**1. Confirm what is about to be destroyed.** From `infra/`, on the previous commit:
+**0. Note the starting state.** On the branch that contains this runbook, `terraform plan` fails. That is expected and is the problem this runbook exists to solve: the moved resources are refreshed through a role that cannot read them, so the plan errors before it can produce anything.
 
 ```
-git stash
+Error: reading SNS Topic (...): AuthorizationError
+Error: reading Security Hub Organization Configuration (...): InvalidAccessException
+```
+
+**1. Confirm what is about to be destroyed.** Switch to the code as it was before the move, so the old addresses still match the state:
+
+```
+git checkout main
+cd infra
 terraform plan -destroy \
   -target=aws_sns_topic_subscription.security_alerts_email \
   -target=aws_sns_topic_policy.security_alerts \
@@ -48,9 +56,11 @@ Between this step and step 3 there is no alerting. Detection keeps running; only
 **3. Apply the new code.**
 
 ```
-git stash pop
+git checkout p1-hardening
 terraform apply
 ```
+
+The plan now completes, because nothing is left in state that has to be read through the wrong account.
 
 This designates the Security account as delegated administrator for both services, creates its detector and hub, enables S3 and malware protection for every member through the organisation configuration rather than on one detector, and rebuilds the alert pipeline in the Security account.
 
