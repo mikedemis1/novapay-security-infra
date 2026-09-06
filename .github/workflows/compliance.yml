@@ -15,6 +15,11 @@ on:
   push:
     branches: [main]
 
+# Action pinning: third-party actions are pinned to a commit with the version
+# in a trailing comment. Actions published by GitHub and HashiCorp stay on
+# major tags, which is the usual line and keeps their security patches
+# arriving without a commit bump here. The line is drawn at who is trusted to
+# move a tag under you, not at whether pinning is nice to have.
 permissions:
   contents: read
   security-events: write
@@ -65,7 +70,12 @@ jobs:
       - name: checkov
         id: checkov
         continue-on-error: true
-        uses: bridgecrewio/checkov-action@master
+        # Pinned to a commit, not to master. An action referenced by a moving
+        # branch runs whatever that repository contains at the moment the job
+        # starts, which hands a third party arbitrary execution inside this
+        # pipeline. That is the supply-chain shape the pipeline exists to catch
+        # in Terraform, and it was sitting in the pipeline itself.
+        uses: bridgecrewio/checkov-action@99bb2caf247dfd9f03cf984373bc6043d4e32ebf # v12.1347.0
         with:
           directory: .
           framework: terraform
@@ -76,7 +86,7 @@ jobs:
       - name: trivy config
         id: trivy
         continue-on-error: true
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: config
           scan-ref: .

@@ -390,3 +390,19 @@ The remaining 27 carry an inline skip with the reason written next to the code, 
 **Alternative rejected:** a central `.checkov.yaml` skip list. It is shorter and it separates each suppression from the code it excuses, which is how a suppression outlives the reason for it.
 
 **Result:** 232 passed, 0 failed, 30 skipped. Every skip has a sentence a reviewer can disagree with, which is the point.
+
+---
+
+## 2026-09-06 — GitHub Actions pinned to commits, after the first CI run failed
+
+**Decision:** Third-party actions are pinned to a commit SHA with the version in a trailing comment. Actions published by GitHub and HashiCorp stay on major tags.
+
+**Why:** The first run of the pipeline failed before executing a single scanner: `aquasecurity/trivy-action@0.28.0` does not exist, and never did. The tag was wrong from the day it was written, and nothing caught it because the workflow had only ever been reasoned about, not run.
+
+Looking at the other actions to fix it turned up the larger problem. `bridgecrewio/checkov-action@master` was referenced by a moving branch, which means the job runs whatever that repository contains at the moment it starts. That is arbitrary code execution by a third party inside the pipeline, and it is the same supply-chain shape the pipeline flags in Terraform through CKV_TF_1. The gate had the defect it exists to catch.
+
+The line between commit-pinned and tag-pinned is about who is trusted not to move a tag under you, not about whether pinning is worth doing. GitHub and HashiCorp moving a major tag to ship a security patch is the behaviour you want; an arbitrary publisher doing it is the thing you are defending against.
+
+**Alternative rejected:** pinning everything, including `actions/checkout`. It would mean a commit bump every time GitHub patches its own action, and the maintenance falls off first in exactly the repositories that need it.
+
+**Note for the next run:** the checkov action installs its own checkov, which is not necessarily the 3.3.8 that produced the local clean result. The findings may differ from the local run for that reason alone.
