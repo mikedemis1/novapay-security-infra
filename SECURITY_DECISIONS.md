@@ -339,3 +339,27 @@ Running log of architecture/security decisions and why they were made. Written i
 **On tfsec:** the brief names Checkov and tfsec. tfsec entered maintenance mode in 2023 and its checks live on in Trivy, which is what runs here. Following the brief literally would have meant shipping a scanner that no longer receives rules.
 
 **On testing the policies:** the first version of the network rule passed a security group open on port 22 from anywhere. The HCL parser represents one `ingress` block as an object and several as a list, so iterating walked field values instead of rules. It would have started working by accident the day someone added a second block. A fixture that must fail is now part of the pipeline.
+
+---
+
+## 2026-09-06 — Trivy reports, it does not block
+
+**Decision:** Of the four checks in the compliance workflow, three block a merge: checkov, gitleaks and conftest. Trivy runs, uploads SARIF and is shown in the summary, but does not fail the build. The summary table now has a column saying so.
+
+**Why:** The defect was not that trivy did not gate. It was that the summary listed four checks in one table with no indication that only three of them stopped anything, so the run looked like four gates and was one short. A reviewer reading it would have drawn the wrong conclusion, which is the same failure as a policy rule that cannot fail.
+
+Making it gate today would fail every merge. `trivy config` currently returns eight HIGH/CRITICAL findings:
+
+| Finding | Where | Assessment |
+|---|---|---|
+| AWS-0095, SNS topic not encrypted | `alerting.tf` | real, one attribute, worth fixing |
+| AWS-0132, state bucket not using a CMK | `state_backend.tf` | real, needs a key and carries a monthly cost |
+| AWS-0164, subnet assigns public IPs (×2) | `networking.tf` | `map_public_ip_on_launch` is what makes a public subnet public |
+| AWS-0104, unrestricted egress (×2) | `security_groups.tf` | deliberate, and the chained ingress is where this design does its work |
+| AWS-0040 public endpoint, AWS-0104 node egress | vendored `terraform-aws-modules/eks` | upstream, not ours to change |
+
+Four of the eight are not defects, so gating first would mean writing four suppressions under deadline pressure to unblock a merge. Suppressions written that way are how a scanner stops being read at all.
+
+**Alternative rejected:** dropping trivy. The brief asks for a second opinion after checkov, and it is producing two findings worth acting on. A scanner that reports without blocking is still worth having; a scanner everyone has learned to override is not.
+
+**Next:** fix AWS-0095 and AWS-0132, write justified `.trivyignore` entries for the other six, then move the column to yes. Until then the table does not overstate what the pipeline does.

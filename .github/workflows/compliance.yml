@@ -135,12 +135,12 @@ jobs:
           {
             echo "## Compliance gate"
             echo
-            echo "| check | result | evidences |"
-            echo "|---|---|---|"
-            echo "| checkov | ${{ steps.checkov.outcome }} | AWS resource misconfiguration |"
-            echo "| trivy config | ${{ steps.trivy.outcome }} | second opinion, successor to tfsec |"
-            echo "| gitleaks | ${{ steps.gitleaks.outcome }} | credentials in history |"
-            echo "| conftest | ${{ steps.conftest.outcome }} | DORA Art. 9 and 10 policies in policy/ |"
+            echo "| check | result | blocks merge | evidences |"
+            echo "|---|---|---|---|"
+            echo "| checkov | ${{ steps.checkov.outcome }} | yes | AWS resource misconfiguration |"
+            echo "| trivy config | ${{ steps.trivy.outcome }} | no, advisory | second opinion, successor to tfsec |"
+            echo "| gitleaks | ${{ steps.gitleaks.outcome }} | yes | credentials in history |"
+            echo "| conftest | ${{ steps.conftest.outcome }} | yes | DORA Art. 9 and 10 policies in policy/ |"
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [ "${{ steps.conftest.outcome }}" != "success" ]; then
@@ -155,3 +155,13 @@ jobs:
             echo "::error::checkov found a misconfiguration"
             exit 1
           fi
+
+          # trivy is deliberately not a gate yet. It currently reports eight
+          # HIGH/CRITICAL findings, four of them in the vendored EKS module and
+          # two that describe public subnets doing what public subnets do.
+          # Gating on it before that set is triaged would block every merge on
+          # findings nobody intends to act on, which is how a gate gets
+          # disabled entirely. The column above says which checks block, so
+          # reading the summary does not imply four gates where there are
+          # three. Findings still reach the Security tab through the SARIF
+          # upload. Tracked in SECURITY_DECISIONS.md.
