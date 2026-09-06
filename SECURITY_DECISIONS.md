@@ -440,3 +440,47 @@ A baseline names each finding by file, resource and check id. New findings still
 **The part worth remembering.** Checkov reported clean on this machine all day and it was not. `--download-external-modules` creates `.external_modules` and then downloads nothing here: the repository sits under a ~130 character OneDrive path, the module adds its own tree under a 40 character commit SHA, and Windows refuses at 260. Git says "Filename too long"; checkov says nothing and prints a pass count. That is the failure the comment in `compliance.yml` warns about, and it was happening in the very runs used to declare the code clean.
 
 Local checkov on Windows therefore under-reports, and the reproduction is to copy `infra/` to a short path and scan there. It is written down in `policy/README.md` because the next person to trust a green local run will be me.
+
+---
+
+## 2026-09-06 — Wind down what bills, keep what does not
+
+**Decision:** Destroy the web ACL, GuardDuty, Security Hub and their organisation layer, the D2 test IAM user and its long-lived access key, the Secrets Manager secret and the application KMS key. Keep the organisation and its three accounts, the service control policy, Identity Center, the VPC, the state bucket, and the organisation CloudTrail with its key. Do not run `terraform destroy`.
+
+**Why:** The estate billed about 15.50 USD a month against a 40 EUR budget, and the hardening apply it was waiting for was no longer worth the day it would take. Most of the landing zone is free, so an untargeted destroy would have saved nothing and cost the organisation: `aws_organizations_account` does not close an account on destroy, it removes it from the organisation, and the member email addresses cannot then be reused.
+
+**Alternatives rejected:** Apply the hardening first, capture evidence, then tear down — about two hours with real risk of getting stuck, on the day the job applications were due out. Full `terraform destroy` — irreversible for no saving, as above.
+
+**What it cost:** the estate went from 15.50 to about 1.30 USD a month, reaching that figure a week later rather than the next day, because both the key and the secret carry seven-day windows and bill while scheduled.
+
+---
+
+## 2026-09-06 — The organisation CloudTrail stays, at a euro a month
+
+**Decision:** Do not remove `prevent_destroy` from the trail, its bucket or its key. Leave all three running.
+
+**Why:** Step 4 of the wind-down stopped on `Instance cannot be destroyed`. The guard was added in PR #1 and it did exactly what such a guard is for: it turned a step in a script into a decision. Keeping the trail costs about 1.20 USD a month more than removing it. An organisation trail with log-file validation is the one control nobody switches off, and overriding a guard put there deliberately, to save a euro, would have been the wrong answer to a question I had already answered when I wrote the guard.
+
+**Consequence:** the README keeps a `live` row that means something, and the estate keeps an audit trail. Removing them later is a code change and a review, which is the correct amount of friction.
+
+---
+
+## 2026-09-06 — `terraform state rm` on the Security Hub organisation configuration
+
+**Decision:** Drop `aws_securityhub_organization_configuration.main` from state rather than destroy it.
+
+**Why:** Its destroy is an `UpdateOrganizationConfiguration` call, not a delete, and the resource is configured with `provider = aws.security`. The Security account is not the Security Hub administrator, so the call returns `InvalidAccessException` and no amount of retrying changes that.
+
+**Why this is acceptable here and not generally:** a `state rm` abandons a real object to no owner, which is the normal way an estate rots. It holds in this case on two grounds, both temporary: the object is an auto-enable setting that ceased to exist minutes later when Security Hub was disabled, and this stack is never applied again, so there is no future plan for the orphan to surprise. Neither ground would hold on a stack still in use. Recorded here rather than left in shell history for exactly that reason.
+
+---
+
+## 2026-09-06 — Design documents were checked against the account, not the code
+
+**Decision:** Rewrite the B2 table in `THREAT_MODEL.md` and the guardrails section of `ARCHITECTURE.md` from `aws organizations describe-policy` output rather than from `scp.tf`.
+
+**Why:** The B2 table claimed five enforced controls. Read back from the organisation, one was accurate, two covered a narrower scope than claimed, and two described policy that had never been applied: the region deny does not exist, and nothing denies `UpdateTrail` or `PutEventSelectors`. The Security unit carries only `FullAWSAccess`, so the account nominated to hold detection is the one account with no guardrail on it. `ARCHITECTURE.md` separately stated that GuardDuty and Security Hub were administered from the Security account, which was never true at any point.
+
+**Why no tool caught it:** Checkov and Conftest read the Terraform that was written, and the written policy is correct. It was never applied. No scanner in this repository reads an organisation, so the gap between written and applied is invisible to all of them by construction. This is the same class of failure as the CloudTrail encryption problem in August: a claim about a live system accepted without being tested against that system.
+
+**Consequence:** `capture-after-apply.sh` section headings were changed from assertions to questions. A heading that states the expected answer turns a capture into confirmation of its own assumption, which is precisely how "GuardDuty administered from the Security account" came to be printed above output naming the management account.

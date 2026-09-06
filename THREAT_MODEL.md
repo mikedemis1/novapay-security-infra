@@ -9,7 +9,7 @@ Two catalogues are used. STRIDE frames the threats per trust boundary, because t
 1. **Organisation control.** Whoever controls the management account controls every account, can create new ones, and is not restrained by any service control policy.
 2. **The audit trail.** The record of what happened. Valuable because destroying or narrowing it is how everything else gets away with it.
 3. **Transaction data.** Does not exist yet. The controls around it do, which is the point of building them first.
-4. **The database credential.** In Secrets Manager, encrypted with a customer-managed key.
+4. **The database credential.** Was in Secrets Manager, destroyed in the 2026-09-06 wind-down, and encrypted with the AWS-managed key throughout: the customer-managed key this model assumed was written but never applied. It also sat in Terraform state in plaintext, which is asset 6's problem.
 5. **Cluster control.** The Kubernetes API, and through it every workload identity.
 6. **Terraform state.** Describes the whole estate and has historically contained secrets in plaintext.
 
@@ -39,21 +39,51 @@ Two catalogues are used. STRIDE frames the threats per trust boundary, because t
 | STRIDE | Threat | Control | Status |
 |---|---|---|---|
 | Spoofing | Root account password reset using a known root email address | root MFA on every account | **partial: one account still lacks it** |
-| Spoofing | Stolen static access key used from anywhere | humans through Identity Center, no IAM users in Terraform, no long-lived keys | partial: administrator IAM users still exist outside Terraform |
-| Elevation | Cluster API reachable from any address | `cluster_endpoint_public_access_cidrs`, now a required input | live |
+| Spoofing | Stolen static access key used from anywhere | humans through Identity Center, no IAM users in Terraform, no long-lived keys | partial: true of Terraform only since 2026-09-06, and two administrator IAM users still exist outside it |
+| Elevation | Cluster API reachable from any address | `cluster_endpoint_public_access_cidrs`, now a required input | enforced when a cluster exists; none does |
 | Information disclosure | Account root emails readable in public git history | branch deletion, which did not work; needs a garbage-collection request | **open** |
 
 The first and last rows compound. A root email that is readable and an account without MFA are one finding, not two, and that is the highest-priority open item in the repository.
 
+The second row was simply false until 2026-09-06. `aws_iam_user.test` and
+`aws_iam_access_key.test` were in the Terraform and had been since August, so
+"no IAM users in Terraform, no long-lived keys" described an intention rather
+than the state. They were destroyed in the wind-down, which is the only reason
+the row now reads the way it always claimed to.
+
 ### B2, management to member accounts
+
+This table was rewritten on 2026-09-06 after its claims were read back from the
+organisation rather than from the code. One row was accurate, two overstated
+their scope, and two described policy that does not exist. The Status column now
+distinguishes what is enforced from what is only written.
 
 | STRIDE | Threat | Control | Status |
 |---|---|---|---|
-| Repudiation | Member account stops or deletes its own trail | organisation trail plus `DenyTrailTampering` | live |
-| Repudiation | Trail narrowed rather than deleted, so it stays green and records nothing | `UpdateTrail` and `PutEventSelectors` denied | live |
-| Tampering | Detection disabled in a member account | GuardDuty, Security Hub and Config actions denied on both units | live |
-| Elevation | Account leaves the organisation to escape the guardrails | `LeaveOrganization` and `CloseAccount` denied at the root | live |
-| Tampering | Resources created outside the EU | region deny on both units | live |
+| Repudiation | Member account stops or deletes its own trail | `DenyTrailTampering`: `cloudtrail:StopLogging`, `cloudtrail:DeleteTrail` | live on the Workloads unit only |
+| Repudiation | Trail narrowed rather than deleted, so it stays green and records nothing | nothing denies `UpdateTrail` or `PutEventSelectors` | **gap: claimed live, never existed** |
+| Tampering | Detection disabled in a member account | `DenyGuardDutyTampering`: `guardduty:DeleteDetector`, `guardduty:DisassociateFromMasterAccount` | live on Workloads only, GuardDuty only, and GuardDuty was wound down on 2026-09-06, so it now guards nothing |
+| Elevation | Account leaves the organisation to escape the guardrails | `DenyLeavingOrganization`: `organizations:LeaveOrganization` | live on the Workloads unit; not at the root, and `CloseAccount` is not denied |
+| Tampering | Resources created outside the EU | region deny | **gap: claimed live, never existed** |
+
+**The Security account is governed by nothing.** `novapay-workloads-guardrails`
+is attached to the Workloads unit alone; the Security unit carries only
+`FullAWSAccess`. Every row above therefore stops at the boundary of one unit.
+The account this design nominates to hold detection is the account with no
+guardrails on it.
+
+**The narrowing row is the one to read twice.** `ARCHITECTURE.md` argues, in the
+guardrails section, that narrowing is the failure that matters, because a trail
+updated to record almost nothing still exists and still reports healthy. The
+policy that was supposed to answer that denies `StopLogging` and `DeleteTrail`
+and says nothing about `UpdateTrail`. The document identified the attack
+correctly and then marked the control live without checking it, for weeks.
+
+Nothing in this repository could have caught any of it. Checkov and Conftest
+read the Terraform that was written, and the policies here were written; they
+were simply never applied, and no scanner reads an organisation. It took
+`aws organizations describe-policy` against the live account, which is the whole
+argument for periodic verification against a source that is not the code.
 
 **What no policy on this boundary protects.** Service control policies do not apply to the management account. It holds the organisation, the log bucket, the log key and the Terraform state, and the only things standing in front of it are root MFA and its IAM configuration. Two administrator IAM users with long-lived keys exist there, one without MFA, created in the console and therefore invisible to every scanner in this repository. That is the single largest gap in the model and it is not fixable in Terraform.
 
@@ -62,9 +92,22 @@ The first and last rows compound. A root email that is readable and an account w
 | STRIDE | Threat | Control | Status |
 |---|---|---|---|
 | Tampering | Log objects altered after the fact | log-file validation, S3 versioning | live |
-| Information disclosure | Logs readable by anyone who can read the bucket | customer-managed key scoped to this trail by encryption context | live |
+| Information disclosure | Logs readable by anyone who can read the bucket | customer-managed key set as the bucket default | **gap: the key exists and the objects do not use it** |
 | Tampering | Log objects deleted | versioning only | **gap: no deny statement, no object lock** |
-| Denial of service | Detection findings never reach a person | EventBridge to SNS, in the account where findings aggregate | live |
+| Denial of service | Detection findings never reach a person | EventBridge to SNS | the rule and topic still exist, but detection was wound down on 2026-09-06, so nothing can generate a finding to deliver |
+
+**The encryption row, verified on 2026-09-06.** `get-bucket-encryption` returns
+`aws:kms` with the customer-managed key. `head-object` on the log objects
+returns `AES256` and no key id. CloudTrail sets encryption on its own
+`PutObject` call and the per-object choice beats the bucket default, so every
+object in this bucket is SSE-S3 and the key protects none of them. The August
+decision log recorded this as fixed; only the bucket default had changed.
+
+That has a consequence for the wind-down. The key was kept, at about a euro a
+month, partly on the strength of this row. It is not encrypting the trail. What
+still justifies keeping the trail is log-file validation, multi-region coverage
+and organisation scope, all of which are real and were verified. The key is
+carried along by `prevent_destroy` and is the weakest euro in the estate.
 
 The deletion gap matters more than it looks: the design once claimed a bucket policy denying deletion from other accounts, and no such statement existed. The claim was removed rather than the gap being hidden.
 
@@ -72,17 +115,25 @@ The deletion gap matters more than it looks: the design once claimed a bucket po
 
 Mapped to the OWASP Kubernetes Top 10.
 
+**No cluster is running.** It is created for a test day and destroyed the same
+day, because the control plane bills about 0.10 USD an hour. So `enforced` below
+means the control was applied to a real cluster and, where noted, tested by
+deliberate violation on 2026-08-09; it does not mean anything is running now.
+The evidence is `evidence/2026-08-09-cluster-control-tests.md`. The permanent
+part of this boundary is the code in `infra/workload/`, which the pipeline
+checks on every pull request.
+
 | OWASP K8s | Threat | Control | Status |
 |---|---|---|---|
-| K01 insecure workload configuration | Privileged or root containers | Pod Security Standards `restricted`, Kyverno in enforce | live, tested by violation |
-| K01 | Writable root filesystem | enforced read-only, with explicit volumes | live, tested |
-| K03 overly permissive RBAC | Pod identity reaching more than it needs | IRSA scoped by both subject and audience, one secret | live |
-| K04 lack of centralised policy enforcement | Policy applied by convention | Kyverno cluster policies | live |
-| K06 broken authentication | Cluster API open to the internet | endpoint allow list now required | live |
-| K07 missing network segmentation | Lateral movement between pods | default-deny plus DNS-only egress | live, and initially not working at all |
-| K07 | DNS used as an exfiltration channel | egress scoped to CoreDNS rather than port 53 anywhere | live, never tested |
-| K08 secrets management failures | Credential readable by the wrong pod | Secrets Manager, customer-managed key, access only through Secrets Manager | live |
-| K09 misconfigured logging | No record of cluster activity | control plane audit logs on | live, though inherited from a module default rather than chosen |
+| K01 insecure workload configuration | Privileged or root containers | Pod Security Standards `restricted`, Kyverno in enforce | enforced, tested by violation |
+| K01 | Writable root filesystem | enforced read-only, with explicit volumes | enforced, tested |
+| K03 overly permissive RBAC | Pod identity reaching more than it needs | IRSA scoped by both subject and audience, one secret | enforced; the secret it scoped to was destroyed on 2026-09-06 |
+| K04 lack of centralised policy enforcement | Policy applied by convention | Kyverno cluster policies | enforced |
+| K06 broken authentication | Cluster API open to the internet | endpoint allow list now required | enforced |
+| K07 missing network segmentation | Lateral movement between pods | default-deny plus DNS-only egress | enforced, and initially not working at all |
+| K07 | DNS used as an exfiltration channel | egress scoped to CoreDNS rather than port 53 anywhere | enforced, never tested |
+| K08 secrets management failures | Credential readable by the wrong pod | Secrets Manager, access only through Secrets Manager; the customer-managed key was never applied | wound down 2026-09-06 with the secret |
+| K09 misconfigured logging | No record of cluster activity | control plane audit logs on | enforced, though inherited from a module default rather than chosen |
 
 The K07 row is the honest one. Those policies existed and were enforced by nothing for the whole first attempt, because the VPC CNI does not act on NetworkPolicy objects unless told to. They were only found because the test tried to violate them instead of confirming they existed.
 
