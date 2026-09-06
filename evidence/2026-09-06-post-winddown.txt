@@ -1,0 +1,61 @@
+# NovaPay estate after the wind-down
+# Captured 2026-09-06T18:34:53Z, region eu-west-1. Every command read-only.
+#
+# The README table claims some controls are wound down and others still live.
+# This is that claim read back from AWS. Account ids redacted.
+
+==============================================================
+1. GuardDuty: wound down
+==============================================================
+$ aws guardduty list-detectors --region eu-west-1
+{
+    "DetectorIds": []
+}
+
+$ aws guardduty list-organization-admin-accounts --region eu-west-1
+{
+    "AdminAccounts": []
+}
+
+==============================================================
+2. Security Hub: wound down
+==============================================================
+$ aws securityhub get-enabled-standards --region eu-west-1
+
+aws: [ERROR]: An error occurred (InvalidAccessException) when calling the GetEnabledStandards operation: Account <account-id> is not subscribed to AWS Security Hub
+
+==============================================================
+3. Web ACL: wound down
+==============================================================
+$ aws wafv2 list-web-acls --scope REGIONAL --region eu-west-1
+{
+    "WebACLs": []
+}
+
+==============================================================
+4. Organisation CloudTrail: still live, and the only trail left
+==============================================================
+$ aws cloudtrail describe-trails --region eu-west-1
+----------------------------------------------------------
+|                     DescribeTrails                     |
++-------+---------------------+-----------+--------------+
+| Multi |        Name         | OrgTrail  | Validation   |
++-------+---------------------+-----------+--------------+
+|  True |  novapay-org-trail  |  True     |  True        |
++-------+---------------------+-----------+--------------+
+
+$ aws cloudtrail get-trail-status --name novapay-org-trail --region eu-west-1
+{
+    "IsLogging": true
+}
+
+==============================================================
+5. Organisation and accounts: still live
+==============================================================
+$ aws organizations list-accounts --query length(Accounts)
+3
+$ aws organizations list-policies --filter SERVICE_CONTROL_POLICY
+[
+    "FullAWSAccess",
+    "novapay-workloads-guardrails"
+]
