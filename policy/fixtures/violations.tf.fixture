@@ -1,0 +1,39 @@
+resource "aws_kms_key" "bad" {
+  description = "no rotation"
+}
+
+resource "aws_cloudtrail" "bad" {
+  name           = "bad"
+  s3_bucket_name = "x"
+}
+
+resource "aws_s3_bucket" "bad" {
+  bucket = "unprotected"
+}
+
+resource "aws_security_group" "bad" {
+  name = "bad"
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_secretsmanager_secret" "bad" {
+  name = "bad"
+}
+
+resource "aws_iam_user" "bad" {
+  name = "bad"
+}
+
+resource "aws_iam_access_key" "bad" {
+  user = aws_iam_user.bad.name
+}
+
+module "bad_eks" {
+  source                         = "terraform-aws-modules/eks/aws"
+  cluster_endpoint_public_access = true
+}

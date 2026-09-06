@@ -1,0 +1,150 @@
+# Compliance gate.
+#
+# Everything here runs without AWS credentials, on purpose. A gate that needs
+# to reach the account it is guarding is a gate that fails open the day the
+# credentials expire, and it cannot run on a pull request from a fork.
+#
+# That constraint is why the policy checks read Terraform source rather than a
+# plan. It costs precision: a value that comes from a variable or a data source
+# is invisible to them, so these rules catch what is written down, and the
+# runtime state is Security Hub's job, not this file's.
+name: compliance
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write
+
+env:
+  TF_VERSION: "1.10.5"
+
+jobs:
+  terraform:
+    name: format and validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive
+
+      # -backend=false is what makes this credential-free: it configures the
+      # providers and resolves the module tree without touching S3.
+      - name: terraform validate (platform)
+        run: |
+          terraform -chdir=infra init -backend=false -input=false
+          terraform -chdir=infra validate
+
+      - name: terraform validate (workload)
+        run: |
+          terraform -chdir=infra/workload init -backend=false -input=false
+          terraform -chdir=infra/workload validate
+
+  scan:
+    name: scanners and policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks scans history, not just the working tree. A secret removed
+          # in the tip commit is still a leaked secret.
+          fetch-depth: 0
+
+      # --download-external-modules matters more than it looks. Without it
+      # checkov skipped the entire EKS module, which is most of the resources
+      # in this repo, and still reported a clean-looking pass count.
+      - name: checkov
+        id: checkov
+        continue-on-error: true
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: .
+          framework: terraform
+          download_external_modules: true
+          output_format: cli,sarif
+          output_file_path: console,checkov.sarif
+
+      - name: trivy config
+        id: trivy
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: .
+          format: sarif
+          output: trivy.sarif
+          severity: HIGH,CRITICAL
+
+      - name: gitleaks
+        id: gitleaks
+        continue-on-error: true
+        run: |
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz" \
+            | tar -xz -C /usr/local/bin gitleaks
+          gitleaks detect --source . --redact --report-format sarif --report-path gitleaks.sarif
+
+      - name: conftest
+        id: conftest
+        continue-on-error: true
+        run: |
+          curl -sSL "https://github.com/open-policy-agent/conftest/releases/download/v0.56.0/conftest_0.56.0_Linux_x86_64.tar.gz" \
+            | tar -xz -C /usr/local/bin conftest
+          conftest test --parser hcl2 --policy policy --all-namespaces \
+            $(find infra -name '*.tf') | tee conftest.txt
+
+      # A policy suite that has only run against compliant code has not been
+      # tested. This fixture violates every rule on purpose, so the step fails
+      # if conftest reports success.
+      - name: policy self-test
+        run: |
+          if conftest test --parser hcl2 --policy policy --all-namespaces policy/fixtures/violations.tf.fixture >/dev/null 2>&1; then
+            echo "::error::the deliberate violations passed; a rule has stopped working"
+            exit 1
+          fi
+          echo "policy rules fire on known-bad input"
+
+      - name: upload sarif
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: .
+          category: iac
+
+      # The gate itself. Every scanner above runs to completion first, so one
+      # failure does not hide the others: a reviewer gets the whole picture in
+      # one run rather than fixing one finding per push.
+      - name: gate
+        if: always()
+        run: |
+          {
+            echo "## Compliance gate"
+            echo
+            echo "| check | result | evidences |"
+            echo "|---|---|---|"
+            echo "| checkov | ${{ steps.checkov.outcome }} | AWS resource misconfiguration |"
+            echo "| trivy config | ${{ steps.trivy.outcome }} | second opinion, successor to tfsec |"
+            echo "| gitleaks | ${{ steps.gitleaks.outcome }} | credentials in history |"
+            echo "| conftest | ${{ steps.conftest.outcome }} | DORA Art. 9 and 10 policies in policy/ |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${{ steps.conftest.outcome }}" != "success" ]; then
+            echo "::error::policy check failed; see policy/README.md for what each rule evidences"
+            exit 1
+          fi
+          if [ "${{ steps.gitleaks.outcome }}" != "success" ]; then
+            echo "::error::gitleaks found a credential"
+            exit 1
+          fi
+          if [ "${{ steps.checkov.outcome }}" != "success" ]; then
+            echo "::error::checkov found a misconfiguration"
+            exit 1
+          fi

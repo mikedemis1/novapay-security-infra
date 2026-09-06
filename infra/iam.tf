@@ -1,17 +1,29 @@
-# Test IAM user for iterating on least-privilege policies (D2 ③) without touching
-# the main admin account — a wrong policy here can't lock the real user out.
-resource "aws_iam_user" "test" {
+# A role for iterating on least-privilege policies without risking the admin
+# identity: a wrong Deny here cannot lock anyone out of anything real.
+#
+# It was an IAM user with a static access key until 2026-09-06, and the key's
+# secret was a Terraform output. That put a live credential in the state file
+# in plaintext, in a bucket in the management account, to test policies that
+# an assumed role tests just as well. Roles hand out credentials that expire;
+# users hand out credentials that get committed.
+resource "aws_iam_role" "policy_test" {
   provider = aws.workloads
-  name     = "novapay-iam-test-user"
+  name     = "novapay-policy-test"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        AWS = "arn:aws:iam::${aws_organizations_account.workloads.id}:root"
+      }
+      Action = "sts:AssumeRole"
+    }]
+  })
 
   tags = {
-    Name = "novapay-iam-test-user"
+    Name = "novapay-policy-test"
   }
-}
-
-resource "aws_iam_access_key" "test" {
-  provider = aws.workloads
-  user     = aws_iam_user.test.name
 }
 
 # Explicit Deny guardrail based on the IAM threat model (state.md ③):
@@ -65,9 +77,9 @@ resource "aws_iam_policy" "deny_dangerous_actions" {
   policy   = data.aws_iam_policy_document.deny_dangerous_actions.json
 }
 
-resource "aws_iam_user_policy_attachment" "test_deny_dangerous_actions" {
+resource "aws_iam_role_policy_attachment" "test_deny_dangerous_actions" {
   provider   = aws.workloads
-  user       = aws_iam_user.test.name
+  role       = aws_iam_role.policy_test.name
   policy_arn = aws_iam_policy.deny_dangerous_actions.arn
 }
 
@@ -128,17 +140,8 @@ resource "aws_iam_policy" "read_only_d2" {
   policy   = data.aws_iam_policy_document.read_only_d2.json
 }
 
-resource "aws_iam_user_policy_attachment" "test_read_only_d2" {
+resource "aws_iam_role_policy_attachment" "test_read_only_d2" {
   provider   = aws.workloads
-  user       = aws_iam_user.test.name
+  role       = aws_iam_role.policy_test.name
   policy_arn = aws_iam_policy.read_only_d2.arn
-}
-
-output "test_user_access_key_id" {
-  value = aws_iam_access_key.test.id
-}
-
-output "test_user_secret_access_key" {
-  value     = aws_iam_access_key.test.secret
-  sensitive = true
 }
