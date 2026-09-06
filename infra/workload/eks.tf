@@ -27,7 +27,17 @@ module "eks" {
   # On by default in the module, not by anything written here. Stated so that
   # the answer to "which of these did you choose?" is not a guess.
   cluster_endpoint_private_access = true
-  cluster_enabled_log_types       = ["api", "audit", "authenticator"]
+
+  # All five, not the three that were here. controllerManager and scheduler
+  # are the two that show a workload being scheduled somewhere it should not
+  # be, which is the half of a compromise the audit log does not cover.
+  cluster_enabled_log_types = [
+    "api",
+    "audit",
+    "authenticator",
+    "controllerManager",
+    "scheduler",
+  ]
 
   # Without this, the identity running `terraform apply` (the assumed
   # OrganizationAccountAccessRole) gets no RBAC access to the cluster it
@@ -68,6 +78,21 @@ module "eks" {
       max_size       = 1
       desired_size   = 1
       subnet_ids     = [local.app_subnet_ids[0], local.app_subnet_ids[1]]
+
+      # The module defaults this to 2, which is one hop more than the node
+      # itself needs and exactly the hop a container needs to reach the
+      # instance metadata service and read the node role's credentials. That
+      # is the standard escape from a compromised pod to the whole node.
+      #
+      # Safe to close here because enable_irsa is on: pods receive
+      # credentials through the OIDC provider, not through metadata, so
+      # nothing in this cluster depends on the extra hop. http_tokens is
+      # already "required" in the module, so IMDSv1 was never available.
+      metadata_options = {
+        http_endpoint               = "enabled"
+        http_tokens                 = "required"
+        http_put_response_hop_limit = 1
+      }
     }
   }
 
