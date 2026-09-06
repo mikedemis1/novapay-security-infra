@@ -1,0 +1,96 @@
+# Landing-zone baseline, captured 2026-09-06, before the hardening pass.
+#
+# Why this file exists: the decision log recorded on 2026-08-08 that the
+# organisation trail had been moved from SSE-S3 to the customer-managed key.
+# This capture is the check that was never run at the time. It shows the
+# opposite, and it is kept as the "before" half of that fix.
+#
+# What to look for:
+#   1. get-trail has no KmsKeyId field           -> the trail encrypts with SSE-S3
+#   2. head-object on a live log object          -> "ServerSideEncryption": "AES256"
+#   3. get-bucket-encryption says aws:kms        -> only the bucket default changed,
+#                                                   and CloudTrail overrides it per object
+#   4. both delegated administrators             -> the management account, not Security
+#   5. get-enabled-standards                     -> empty, so Security Hub only relays GuardDuty
+#
+# Every command is read-only. Account and organisation identifiers are replaced.
+
+$ aws cloudtrail get-trail --name novapay-org-trail
+{
+    "Trail": {
+        "Name": "novapay-org-trail",
+        "S3BucketName": "novapay-cloudtrail-logs-<mgmt-account-id>",
+        "IncludeGlobalServiceEvents": true,
+        "IsMultiRegionTrail": true,
+        "HomeRegion": "eu-west-1",
+        "TrailARN": "arn:aws:cloudtrail:eu-west-1:<mgmt-account-id>:trail/novapay-org-trail",
+        "LogFileValidationEnabled": true,
+        "HasCustomEventSelectors": false,
+        "HasInsightSelectors": false,
+        "IsOrganizationTrail": true
+    }
+}
+
+$ aws s3api head-object --bucket novapay-cloudtrail-logs-<mgmt-account-id> \n    --key AWSLogs/<org-id>/<mgmt-account-id>/CloudTrail/eu-west-1/2026/09/06/<object>.json.gz
+{
+    "AcceptRanges": "bytes",
+    "LastModified": "2026-09-06T00:31:59+00:00",
+    "ContentLength": 3655,
+    "ETag": "\"f286e50a7873a4200efadc335e388eb7\"",
+    "VersionId": "GYKBEL_wP6ffB3BYq5rMN3PVVwou1zP2",
+    "ContentEncoding": "gzip",
+    "ContentType": "application/json",
+    "ServerSideEncryption": "AES256",
+    "Metadata": {}
+}
+
+$ aws s3api get-bucket-encryption --bucket <trail bucket>
+{
+    "ServerSideEncryptionConfiguration": {
+        "Rules": [
+            {
+                "ApplyServerSideEncryptionByDefault": {
+                    "SSEAlgorithm": "aws:kms",
+                    "KMSMasterKeyID": "arn:aws:kms:eu-west-1:<mgmt-account-id>:key/83146099-de2f-4351-b4e7-675165a648b2"
+                },
+                "BucketKeyEnabled": true,
+                "BlockedEncryptionTypes": {
+                    "EncryptionType": [
+                        "SSE-C"
+                    ]
+                }
+            }
+        ]
+    }
+}
+
+$ aws guardduty list-organization-admin-accounts
+{
+    "AdminAccounts": [
+        {
+            "AdminAccountId": "<mgmt-account-id>",
+            "AdminStatus": "ENABLED"
+        }
+    ]
+}
+
+$ aws securityhub list-organization-admin-accounts
+{
+    "AdminAccounts": [
+        {
+            "AccountId": "<mgmt-account-id>",
+            "Status": "ENABLED"
+        }
+    ],
+    "Feature": "SecurityHub"
+}
+
+$ aws securityhub get-enabled-standards
+{
+    "StandardsSubscriptions": []
+}
+
+$ aws organizations list-delegated-administrators
+{
+    "DelegatedAdministrators": []
+}
