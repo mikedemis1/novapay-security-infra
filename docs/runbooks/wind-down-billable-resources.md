@@ -29,19 +29,66 @@ So this removes what bills and keeps what does not.
 
 ## Check the assumption first
 
-State was last written by the code from before the detection move, so its
-addresses match that code and not `main`. Everything below runs from the tag:
-
 ```
-git checkout pre-detection-move
 cd infra
-terraform init -backend-config=backend.hcl
 terraform state list
 ```
 
-Every address in the steps below must appear in that listing. One that does not
-means state is not what this runbook assumes. Stop and read it rather than
-guessing.
+Every address named below must appear. One that does not means state is not
+what this runbook assumes; stop and read it rather than guessing.
+
+`terraform init` is not needed if the backend is already configured locally,
+which `state list` returning anything proves. In PowerShell, quote the argument
+if you do need it: `terraform init "-backend-config=backend.hcl"`, because
+PowerShell mangles a native argument containing `=`.
+
+## Which branch to run from
+
+Not the tag, for everything. The first draft of this runbook said to check out
+`pre-detection-move` throughout, by analogy with the detection-move runbook.
+That is wrong here, and the reason is worth keeping.
+
+At that tag the platform stack still contained the cluster, so `providers.tf`
+configures the `kubernetes` and `helm` providers from
+`module.eks.cluster_endpoint` and `data.aws_eks_cluster_auth.this`. The cluster
+has since been destroyed and `module.eks` is no longer in state, which is
+exactly the condition that used to make this repository unplannable. Running
+the wind-down from the tag walks straight back into it. The tag also predates
+`evidence/capture-after-apply.sh`, so checking it out removes the script that
+produces the evidence.
+
+`main` has no such providers in `infra/`: they moved to `infra/workload/` with
+the cluster. So the question becomes which addresses `main` can refresh, and
+the split turns out to be clean.
+
+| Group | Refresh from `main` | Costs |
+|---|---|---|
+| Web ACL, both KMS keys, trail and log bucket, secret, both detectors, Security Hub account, the D2 test user | works | effectively the whole bill |
+| SNS topic, its policy and subscription, the EventBridge rule and target, the two organisation *configurations* | fails: they carry `provider = aws.security`, and that role cannot read a management-account resource | nothing |
+
+The first group is either absent from `main`'s configuration, so it is a plain
+state-only destroy, or present under the default provider, so it refreshes
+against the management account it actually lives in. The second group is the
+one the detection-move runbook exists for, and every resource in it is free: an
+SNS topic, two EventBridge objects and two settings.
+
+So steps 1 to 4 run from `main`. Step 5 is optional and costs nothing.
+
+## Step 0. Capture the evidence, from bash
+
+Do this before anything else. It is the only step here that cannot be repeated,
+because step 3 deletes the logs that most of it reads.
+
+```
+bash evidence/capture-after-apply.sh > evidence/$(date +%F)-pre-winddown.txt
+wc -l evidence/*-pre-winddown.txt
+```
+
+**Run it through `bash`, from the repository root.** PowerShell does not execute
+a `.sh` file, so `./evidence/capture-after-apply.sh > out.txt` there produces an
+empty file and sends the error somewhere the redirect does not capture. A
+zero-line capture looks exactly like a successful one until it is opened. Check
+the line count before continuing.
 
 ## Step 1. The web ACL, which is most of the bill
 
@@ -51,36 +98,28 @@ terraform destroy -target=aws_wafv2_web_acl.novapay_waf
 
 Roughly 7.75 USD a month, around 60 percent of the bill, attached to nothing. It
 has no `aws_wafv2_web_acl_association`, so no traffic passes through it and
-nothing depends on it going. If only one step here ever gets run, this is the
-one.
+nothing depends on it going. It is absent from `main`'s configuration because it
+moved to the workload stack, so this is a state-only destroy and nothing else
+can be caught up in it. If only one step here ever gets run, this is the one.
 
-## Step 2. Detection and alerting
+## Step 2. The D2 test user and its long-lived access key
 
-Order matters: the organisation configuration has to go before the delegated
-administrator, and the administrator before the detector, or the API refuses.
-Terraform derives that from the dependency graph, so pass them in one command
-and let it order them rather than running thirteen commands by hand.
+Free, and the most dangerous thing left once nothing is watching the accounts.
 
 ```
 terraform destroy \
-  -target=aws_sns_topic_subscription.security_alerts_email \
-  -target=aws_sns_topic_policy.security_alerts \
-  -target=aws_cloudwatch_event_target.security_alerts \
-  -target=aws_cloudwatch_event_rule.high_severity_findings \
-  -target=aws_sns_topic.security_alerts \
-  -target=aws_securityhub_organization_configuration.main \
-  -target=aws_securityhub_organization_admin_account.main \
-  -target=aws_securityhub_account.main \
-  -target=aws_guardduty_organization_configuration.main \
-  -target=aws_guardduty_organization_admin_account.main \
-  -target=aws_guardduty_detector_feature.s3_data_events \
-  -target=aws_guardduty_detector_feature.ebs_malware_protection \
-  -target=aws_guardduty_detector.main
+  -target=aws_iam_user_policy_attachment.test_read_only_d2 \
+  -target=aws_iam_user_policy_attachment.test_deny_dangerous_actions \
+  -target=aws_iam_access_key.test \
+  -target=aws_iam_user.test \
+  -target=aws_iam_policy.read_only_d2 \
+  -target=aws_iam_policy.deny_dangerous_actions
 ```
 
-From here nothing watches the accounts. That is the intent, but note the date,
-because "no findings" after this point is not the same claim as "no findings"
-before it.
+This is a long-lived access key belonging to a user created to test D2
+permissions. The detection-move runbook had it scheduled for removal, and that
+runbook is no longer being run. Deleting detection while leaving standing
+credentials behind is the wrong order to stop in.
 
 ## Step 3. Empty the log bucket by hand
 
@@ -110,7 +149,7 @@ aws s3api delete-objects --bucket "$BUCKET" --delete file://markers.json
 Both calls cap at 1000 keys per request, so repeat them until
 `list-object-versions` comes back empty.
 
-## Step 4. Trail, log bucket, secret and keys
+## Step 4. Trail, log bucket, secret, keys and the detectors
 
 ```
 terraform destroy \
@@ -125,8 +164,46 @@ terraform destroy \
   -target=aws_kms_alias.cloudtrail_logs \
   -target=aws_kms_key.cloudtrail_logs \
   -target=aws_kms_alias.app_data \
-  -target=aws_kms_key.app_data
+  -target=aws_kms_key.app_data \
+  -target=aws_guardduty_detector_feature.s3_data_events \
+  -target=aws_guardduty_detector_feature.ebs_malware_protection \
+  -target=aws_guardduty_detector.main \
+  -target=aws_securityhub_account.main
 ```
+
+The last four are the usage-billed half of detection. If AWS refuses to delete
+the detector because the organisation configuration still references it, drop
+those four and take them in step 5 instead, where the whole detection group
+goes together and Terraform can order it from the dependency graph.
+
+From here nothing watches the accounts. That is the intent, but note the date:
+"no findings" after this point is not the same claim as "no findings" before it.
+
+## Step 5, optional. The free remainder
+
+Nothing here bills. Left alone it is state drift, not cost, so it is worth
+doing but not worth fighting.
+
+```
+git checkout pre-detection-move
+terraform destroy \
+  -target=aws_sns_topic_subscription.security_alerts_email \
+  -target=aws_sns_topic_policy.security_alerts \
+  -target=aws_cloudwatch_event_target.security_alerts \
+  -target=aws_cloudwatch_event_rule.high_severity_findings \
+  -target=aws_sns_topic.security_alerts \
+  -target=aws_securityhub_organization_configuration.main \
+  -target=aws_securityhub_organization_admin_account.main \
+  -target=aws_guardduty_organization_configuration.main \
+  -target=aws_guardduty_organization_admin_account.main
+git checkout main
+```
+
+This is the only step that needs the tag, so it is the only one that can hit
+the `kubernetes` provider problem described above. If it does, the fallback is
+to disable the two services in the console and drop the addresses with
+`terraform state rm`. Losing them from state costs nothing once the resources
+are gone and the repository is no longer being applied.
 
 ## The seven-day tail
 
@@ -152,8 +229,9 @@ Three things outlive this runbook because Terraform never created them.
   trail is gone it is the entire remaining bill. Delete it in the console, in
   that region.
 - **Two IAM users in the management account with long-lived access keys**, one
-  without MFA. No scanner in this repository sees them, because none of them
-  reads a live account.
+  without MFA. These are the console-created pair, not the Terraform-managed
+  `aws_iam_user.test` that step 2 removes. No scanner in this repository sees
+  them, because none of them reads a live account.
 - **Two commits carrying account root email addresses**, still served by SHA
   from GitHub's events API after the branches were deleted. Only a GitHub
   Support garbage-collection request removes those.
