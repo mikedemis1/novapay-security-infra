@@ -92,9 +92,22 @@ argument for periodic verification against a source that is not the code.
 | STRIDE | Threat | Control | Status |
 |---|---|---|---|
 | Tampering | Log objects altered after the fact | log-file validation, S3 versioning | live |
-| Information disclosure | Logs readable by anyone who can read the bucket | customer-managed key scoped to this trail by encryption context | live |
+| Information disclosure | Logs readable by anyone who can read the bucket | customer-managed key set as the bucket default | **gap: the key exists and the objects do not use it** |
 | Tampering | Log objects deleted | versioning only | **gap: no deny statement, no object lock** |
 | Denial of service | Detection findings never reach a person | EventBridge to SNS | the rule and topic still exist, but detection was wound down on 2026-09-06, so nothing can generate a finding to deliver |
+
+**The encryption row, verified on 2026-09-06.** `get-bucket-encryption` returns
+`aws:kms` with the customer-managed key. `head-object` on the log objects
+returns `AES256` and no key id. CloudTrail sets encryption on its own
+`PutObject` call and the per-object choice beats the bucket default, so every
+object in this bucket is SSE-S3 and the key protects none of them. The August
+decision log recorded this as fixed; only the bucket default had changed.
+
+That has a consequence for the wind-down. The key was kept, at about a euro a
+month, partly on the strength of this row. It is not encrypting the trail. What
+still justifies keeping the trail is log-file validation, multi-region coverage
+and organisation scope, all of which are real and were verified. The key is
+carried along by `prevent_destroy` and is the weakest euro in the estate.
 
 The deletion gap matters more than it looks: the design once claimed a bucket policy denying deletion from other accounts, and no such statement existed. The claim was removed rather than the gap being hidden.
 
