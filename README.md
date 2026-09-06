@@ -32,7 +32,7 @@ account yet. The second group is the work of the current hardening branch.
 | Terraform state in S3, versioned, locked, public access blocked | live |
 | Compliance pipeline on every pull request | live, both check runs green on PR #1 |
 | EKS cluster, IRSA, Kyverno, Pod Security Standards, network policies | built and tested, destroyed after each test |
-| Web ACL, managed rule groups in count mode | defined, not attached, not running |
+| Web ACL, managed rule groups in count mode | live, attached to nothing, and 60 percent of the bill |
 | Backup and restore with a tested restore | not built, see limits |
 
 The written rows are not a wish list. They are the fixes for problems a review
@@ -108,9 +108,19 @@ August, excluding tax:
 | Everything else | 5.87 |
 | Total | 14.76 |
 
-The web ACL was 60 percent of the bill while protecting nothing, because there is no load balancer to attach it to. It has been moved into the workload stack so it comes up and goes down with the thing it fronts. The EKS control plane bills roughly 0.10 USD per hour whenever the cluster exists, which is why the cluster is a same-day resource.
+The web ACL was 60 percent of the bill while protecting nothing, because there is no load balancer to attach it to. It has been moved into the workload stack in code, so that it comes up and goes down with the thing it fronts, but the applied one is still running and still billing until the wind-down below. The EKS control plane bills roughly 0.10 USD per hour whenever the cluster exists, which is why the cluster is a same-day resource.
 
 A two-threshold budget alarm was created before any billable resource.
+
+## Winding it down
+
+Most of this landing zone is free: the organisation, the accounts and units, the service control policies, Identity Center, the VPC and its subnets, the budget alarm. The VPC is free precisely because the NAT gateway sits in the workload stack. What costs money is the web ACL, two customer-managed keys, GuardDuty, Security Hub and the log bucket, and none of that has to stay running for the code to be worth reading.
+
+So the plan is to remove what bills and keep what does not, rather than run `terraform destroy`. That command is the wrong one here for a reason worth knowing: `aws_organizations_account` on destroy does not close an account, it removes it from the organisation, and the member email addresses cannot then be reused. It would trade the most substantial part of this estate for no saving at all.
+
+`docs/runbooks/wind-down-billable-resources.md` is that procedure, including the two things that catch people out. The log bucket is versioned and sets no `force_destroy`, so Terraform cannot remove it until the object versions and delete markers are gone. And the keys and the secret both carry a seven-day window, so they are scheduled rather than deleted and keep billing for a week after Terraform reports them destroyed.
+
+The table above moves in the same change as the runbook runs. A row that still says `live` afterwards would break the promise this README opens with.
 
 ## Running it
 
@@ -134,7 +144,9 @@ Tear the workload down the same day:
 terraform destroy
 ```
 
-If you are applying the platform stack for the first time since the detection services moved accounts, read `docs/runbooks/move-detection-to-security-account.md` first. That change cannot be applied in one step.
+If you are applying the platform stack for the first time since the detection services moved accounts, read `docs/runbooks/move-detection-to-security-account.md` first. That change cannot be applied in one step, because moving a resource between accounts in Terraform is a destroy and a create rather than an edit.
+
+State here was last written by the code from before that move, so `terraform plan` against `main` fails on a refresh it is not allowed to perform. That is expected, and both runbooks start by checking out the `pre-detection-move` tag, which is the commit whose addresses still match what is in state.
 
 ## The compliance pipeline
 
