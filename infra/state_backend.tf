@@ -1,5 +1,11 @@
 resource "aws_s3_bucket" "tfstate" {
   bucket = "novapay-tfstate-${data.aws_caller_identity.current.account_id}"
+
+  # Destroying the bucket that holds the state is how a project loses track
+  # of everything it has built.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_s3_bucket_versioning" "tfstate" {

@@ -1,7 +1,20 @@
+# Web ACL for the transaction service edge.
+#
+# It lives in the workload stack, not the platform stack, because a web
+# ACL is billed for existing rather than for traffic: roughly 8 USD a
+# month, which was about 60 percent of the August bill while it protected
+# nothing, since there is no load balancer to attach it to yet. In the
+# platform stack it was always on. Here it comes up and goes down with the
+# thing it is meant to protect.
+#
+# Rules stay in count mode. Counting first and blocking second is the right
+# order for managed rule groups, but it is only honest to call it a
+# staging step once there is real traffic to count. Today it is a WAF that
+# would not block anything even if something reached it.
+
 resource "aws_wafv2_web_acl" "novapay_waf" {
-  provider = aws.workloads
-  name     = "novapay-waf"
-  scope    = "REGIONAL"
+  name  = "novapay-waf"
+  scope = "REGIONAL"
 
   visibility_config {
     cloudwatch_metrics_enabled = true

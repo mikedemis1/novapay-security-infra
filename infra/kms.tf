@@ -24,6 +24,12 @@ resource "aws_kms_key" "cloudtrail_logs" {
   deletion_window_in_days = 7
   enable_key_rotation     = true
   policy                  = data.aws_iam_policy_document.kms_cloudtrail_logs.json
+
+  # The whole point of this resource is to survive mistakes, including mine. Losing it makes
+  # every log object already written unreadable.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_kms_alias" "cloudtrail_logs" {

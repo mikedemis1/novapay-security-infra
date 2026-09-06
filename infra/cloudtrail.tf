@@ -4,6 +4,11 @@
 
 resource "aws_s3_bucket" "cloudtrail_logs" {
   bucket = "novapay-cloudtrail-logs-${data.aws_caller_identity.current.account_id}"
+
+  # The whole point of this resource is to survive mistakes, including mine.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_s3_bucket_versioning" "cloudtrail_logs" {
@@ -116,4 +121,9 @@ resource "aws_cloudtrail" "org_trail" {
   kms_key_id = aws_kms_key.cloudtrail_logs.arn
 
   depends_on = [aws_s3_bucket_policy.cloudtrail_logs]
+
+  # A destroy here stops the recording for every account at once.
+  lifecycle {
+    prevent_destroy = true
+  }
 }

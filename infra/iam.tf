@@ -100,10 +100,13 @@ data "aws_iam_policy_document" "read_only_d2" {
   }
 
   statement {
-    sid       = "ReadOnlyWafGet"
-    effect    = "Allow"
-    actions   = ["wafv2:GetWebACL"]
-    resources = [aws_wafv2_web_acl.novapay_waf.arn]
+    sid     = "ReadOnlyWafGet"
+    effect  = "Allow"
+    actions = ["wafv2:GetWebACL"]
+    # Wildcard rather than a reference: the web ACL is defined in the workload
+    # stack now, and a deny that only covers one ACL by ARN stops covering
+    # anything the moment that ACL is recreated with a new id.
+    resources = ["arn:aws:wafv2:eu-west-1:${aws_organizations_account.workloads.id}:regional/webacl/*"]
   }
 
   # ReadOnlyBudget statement removed 2026-08-08: this test user now lives in

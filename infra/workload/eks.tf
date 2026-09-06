@@ -15,7 +15,18 @@ module "eks" {
   # - re-run describe-cluster-versions before reusing this cluster later.
   cluster_version = "1.36"
 
-  cluster_endpoint_public_access = true
+  # The API endpoint was reachable from any address on the internet. IAM and
+  # RBAC still gated it, but "authentication is the only thing between the
+  # internet and the control plane" is a choice, and it had never been made
+  # explicitly: it is the module's default. Now it is a required input, so
+  # applying without deciding is not possible.
+  cluster_endpoint_public_access       = true
+  cluster_endpoint_public_access_cidrs = var.operator_cidrs
+
+  # On by default in the module, not by anything written here. Stated so that
+  # the answer to "which of these did you choose?" is not a guess.
+  cluster_endpoint_private_access = true
+  cluster_enabled_log_types       = ["api", "audit", "authenticator"]
 
   # Without this, the identity running `terraform apply` (the assumed
   # OrganizationAccountAccessRole) gets no RBAC access to the cluster it
@@ -122,4 +133,9 @@ resource "aws_iam_policy" "app_secret_read" {
 resource "aws_iam_role_policy_attachment" "app_irsa_secret_read" {
   role       = aws_iam_role.app_irsa.name
   policy_arn = aws_iam_policy.app_secret_read.arn
+}
+
+variable "operator_cidrs" {
+  description = "Source ranges allowed to reach the EKS public API endpoint, in CIDR form. Deliberately has no default: a wide-open control plane should be a written decision, not an inherited one."
+  type        = list(string)
 }

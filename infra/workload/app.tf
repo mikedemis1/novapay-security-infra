@@ -177,7 +177,26 @@ resource "kubernetes_network_policy" "allow_dns_egress" {
     pod_selector {}
     policy_types = ["Egress"]
 
+    # Scoped to CoreDNS rather than "port 53 anywhere". Without the selector
+    # this rule permits DNS to any destination, which is a working
+    # exfiltration channel: data goes out inside query names to a server the
+    # attacker controls, and the default-deny policy above never sees it
+    # because it is, technically, DNS. The August test only proved HTTPS was
+    # blocked, so this path was never exercised.
     egress {
+      to {
+        namespace_selector {
+          match_labels = {
+            "kubernetes.io/metadata.name" = "kube-system"
+          }
+        }
+        pod_selector {
+          match_labels = {
+            "k8s-app" = "kube-dns"
+          }
+        }
+      }
+
       ports {
         port     = 53
         protocol = "UDP"

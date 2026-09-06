@@ -16,6 +16,12 @@ resource "aws_organizations_account" "security" {
   email             = var.security_account_root_email
   parent_id         = aws_organizations_organizational_unit.security.id
   close_on_deletion = true
+
+  # close_on_deletion means a destroy asks AWS to close a real account, and
+  # closing takes about 90 days to finalise. Not a same-day mistake to undo.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_organizations_account" "workloads" {
@@ -23,4 +29,9 @@ resource "aws_organizations_account" "workloads" {
   email             = var.workloads_account_root_email
   parent_id         = aws_organizations_organizational_unit.workloads.id
   close_on_deletion = true
+
+  # Same reason as the Security account above.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
