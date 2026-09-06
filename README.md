@@ -110,7 +110,7 @@ terraform init -backend-config=../backend.hcl
 terraform apply -var platform_state_bucket=<bucket> -var 'operator_cidrs=["<your ip>/32"]'
 ```
 
-`backend.hcl` holds the state bucket name and is not committed; see `backend.hcl.example`. Copy `terraform.tfvars.example` and fill in the email addresses.
+`infra/backend.hcl` holds the state bucket name and is not committed; see `infra/backend.hcl.example`. Copy `infra/terraform.tfvars.example` to `infra/terraform.tfvars` and fill in the email addresses and the security contact number.
 
 Tear the workload down the same day:
 
