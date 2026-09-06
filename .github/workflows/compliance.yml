@@ -90,6 +90,16 @@ jobs:
           download_external_modules: true
           output_format: cli,sarif
           output_file_path: console,checkov.sarif
+          # Twelve findings inside the vendored EKS module, none of them
+          # actionable and none of them in a file this repository can annotate.
+          # Four are on resources the module never creates with these inputs
+          # (self-managed node groups, the IPv6 CNI policy); three describe
+          # settings that are already correct but reach the resource through a
+          # variable checkov cannot resolve; the rest are decisions recorded in
+          # SECURITY_DECISIONS.md. The baseline names each one, so a new
+          # finding anywhere still fails the gate, and reviewing the accepted
+          # set means reading a committed file rather than trusting a flag.
+          baseline: .checkov.baseline
 
       - name: trivy config
         id: trivy

@@ -43,6 +43,26 @@ conftest test --parser hcl2 --policy policy --all-namespaces policy/fixtures/vio
 
 The first must pass. The second must fail with fourteen findings, one per row below.
 
+### Running checkov the way CI runs it, on Windows
+
+Checkov under-reports on this machine, silently. `--download-external-modules`
+creates `.external_modules` and downloads nothing into it: this repository
+sits under a long OneDrive path, the module adds its own tree beneath a
+40-character commit SHA, and Windows refuses past 260 characters. Git reports
+"Filename too long"; checkov reports a clean pass count.
+
+The symptom is a scan that never mentions `module.eks`. Compare the totals: a
+run that resolves the module reports 435 passed, one that does not reports
+232, and the gap is the entire cluster.
+
+Copy the Terraform to a short path and scan there:
+
+```
+D="$TEMP/np"; mkdir -p "$D"
+git ls-files -z 'infra/*' | xargs -0 -I{} sh -c 'mkdir -p "$0/$(dirname {})" && cp {} "$0/{}"' "$D"
+cd "$D" && checkov -d . --framework terraform --download-external-modules true --baseline .checkov.baseline
+```
+
 ## Rules that passed what they claimed to block
 
 Five cases at the end of the fixture were added on 2026-09-06, after a review found four rules checking that a field was *present* rather than what it *contained*. Each of these was clean under the old rules:

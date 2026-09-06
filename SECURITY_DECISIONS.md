@@ -416,3 +416,27 @@ git ls-remote --tags https://github.com/bridgecrewio/checkov-action
 ```
 
 The suggested fix at the time was to change `output_format` to a single value to match the old action. That would have worked, and it would have quietly frozen the pipeline on a stale action to accommodate a mistake in the pin. The configuration was correct all along; the pin was not.
+
+---
+
+## 2026-09-06 — A baseline for the vendored module, and why local runs were lying
+
+**Decision:** The EKS module is pinned to an exact version, `20.37.2`, and the twelve checkov findings inside it are recorded in a committed `.checkov.baseline`. Any finding that is not in that file still fails the gate.
+
+**Why a baseline and not a skip list:** none of the twelve can carry an inline `#checkov:skip`, because they are in files this repository does not own. The alternatives were a `skip_check` list of the eight check ids, which would also silence those checks if the same mistake ever appeared in our own Terraform, and a `skip_path` over `.external_modules`, which would stop scanning the module altogether. The module scan is what found the two real cluster gaps fixed in `da5dc92`, so switching it off to make the build green would have thrown away the thing that was working.
+
+A baseline names each finding by file, resource and check id. New findings still fail, including new findings in the module after a version bump, which is the behaviour you want from a dependency you did not write.
+
+**Why the exact version pin:** the constraint was `~> 20.0`. The baseline is keyed on the resolved commit, so a floating constraint would expire it during a build that changed nothing, and the gate would fail for a reason nobody could see in the diff. Bumping the module is now a commit, which is where a dependency change belongs.
+
+**The twelve, in three groups:**
+
+| Group | Findings |
+|---|---|
+| Resources the module never creates with these inputs. `self_managed_node_groups` is not set, so its `for_each` is empty; `create_cni_ipv6_iam_policy` defaults to false. Checkov does not evaluate `count` or `for_each`, so it checks code that never runs. | CKV_AWS_341, CKV_AWS_79 on the self-managed group; CKV_AWS_111, CKV_AWS_356 on the IPv6 CNI policy |
+| Settings already correct, reached through a variable checkov cannot resolve. `cluster_encryption_config` defaults to `{resources = ["secrets"]}` with `create_kms_key = true`; `http_tokens` is already `required`; the hop limit is set to 1 by this repository but read from the module's default of 2. | CKV_AWS_58, CKV_AWS_79, CKV_AWS_341 on the managed group |
+| Decisions recorded elsewhere: a public endpoint restricted to operator CIDRs, 90-day log retention on a cluster destroyed after every test, Kubernetes 1.36 against a stale supported-version list, and the module's own security group. | CKV_AWS_38, CKV_AWS_39, CKV_AWS_338, CKV_AWS_339, CKV2_AWS_5 |
+
+**The part worth remembering.** Checkov reported clean on this machine all day and it was not. `--download-external-modules` creates `.external_modules` and then downloads nothing here: the repository sits under a ~130 character OneDrive path, the module adds its own tree under a 40 character commit SHA, and Windows refuses at 260. Git says "Filename too long"; checkov says nothing and prints a pass count. That is the failure the comment in `compliance.yml` warns about, and it was happening in the very runs used to declare the code clean.
+
+Local checkov on Windows therefore under-reports, and the reproduction is to copy `infra/` to a short path and scan there. It is written down in `policy/README.md` because the next person to trust a green local run will be me.

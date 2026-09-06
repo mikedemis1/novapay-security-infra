@@ -1,0 +1,66 @@
+{
+  "failed_checks": [
+    {
+      "file": "/.external_modules/github.com/terraform-aws-modules/terraform-aws-eks/8a0efdbbc84180a26e0bacfd2b6fcfceac53b3b6/main.tf",
+      "findings": [
+        {
+          "resource": "module.eks.aws_cloudwatch_log_group.this[0]",
+          "check_ids": [
+            "CKV_AWS_338"
+          ]
+        },
+        {
+          "resource": "module.eks.aws_eks_cluster.this",
+          "check_ids": [
+            "CKV_AWS_339",
+            "CKV_AWS_38",
+            "CKV_AWS_39",
+            "CKV_AWS_58"
+          ]
+        },
+        {
+          "resource": "module.eks.aws_security_group.cluster[0]",
+          "check_ids": [
+            "CKV2_AWS_5"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "/.external_modules/github.com/terraform-aws-modules/terraform-aws-eks/8a0efdbbc84180a26e0bacfd2b6fcfceac53b3b6/modules/eks-managed-node-group/main.tf",
+      "findings": [
+        {
+          "resource": "module.eks.module.eks_managed_node_group.aws_launch_template.this",
+          "check_ids": [
+            "CKV_AWS_341",
+            "CKV_AWS_79"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "/.external_modules/github.com/terraform-aws-modules/terraform-aws-eks/8a0efdbbc84180a26e0bacfd2b6fcfceac53b3b6/modules/self-managed-node-group/main.tf",
+      "findings": [
+        {
+          "resource": "module.eks.module.self_managed_node_group.aws_launch_template.this",
+          "check_ids": [
+            "CKV_AWS_341",
+            "CKV_AWS_79"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "/.external_modules/github.com/terraform-aws-modules/terraform-aws-eks/8a0efdbbc84180a26e0bacfd2b6fcfceac53b3b6/node_groups.tf",
+      "findings": [
+        {
+          "resource": "module.eks.aws_iam_policy_document.cni_ipv6_policy",
+          "check_ids": [
+            "CKV_AWS_111",
+            "CKV_AWS_356"
+          ]
+        }
+      ]
+    }
+  ]
+}

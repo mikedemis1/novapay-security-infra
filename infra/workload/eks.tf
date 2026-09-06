@@ -5,8 +5,14 @@
 # it running is a faster way to blow the 40 EUR/month cap).
 module "eks" {
   #checkov:skip=CKV_TF_1:A commit hash is how you pin a module fetched from git. This one comes from the Terraform registry, where the equivalent is a version constraint plus the recorded checksum in .terraform.lock.hcl, which is committed. Rewriting the source as a git URL to satisfy the check would drop the registry's own signature verification.
-  source       = "terraform-aws-modules/eks/aws"
-  version      = "~> 20.0"
+  source = "terraform-aws-modules/eks/aws"
+
+  # Exact, not "~> 20.0". A floating constraint means the module can change
+  # under a build that touched nothing, and the compliance baseline below is
+  # keyed on the resolved commit, so a silent bump would expire it and fail
+  # the gate for no reason anyone could see. Bumping this is now a commit,
+  # which is where a dependency change belongs.
+  version      = "20.37.2"
   cluster_name = "novapay-eks"
   # 1.30 (the first guess) turned out to be past EKS standard AND extended
   # support already - `aws eks describe-cluster-versions` is ground truth,
