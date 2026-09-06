@@ -1,0 +1,518 @@
+# NovaPay landing zone, post-apply verification
+# Captured 2026-09-06T17:22:59Z against region eu-west-1
+# Every command read-only. Account IDs, emails and org identifiers redacted.
+
+==============================================================
+1. Organizations: three accounts, two organisational units
+==============================================================
+
+$ aws organizations describe-organization
+{
+    "Organization": {
+        "Id": "<org-id>",
+        "Arn": "arn:aws:organizations::<management-account>:organization/<org-id>",
+        "FeatureSet": "ALL",
+        "MasterAccountArn": "arn:aws:organizations::<management-account>:account/<org-id>/<management-account>",
+        "MasterAccountId": "<management-account>",
+        "MasterAccountEmail": "<email>",
+        "AvailablePolicyTypes": [
+            {
+                "Type": "SERVICE_CONTROL_POLICY",
+                "Status": "ENABLED"
+            }
+        ]
+    }
+}
+
+$ aws organizations list-accounts
+{
+    "Accounts": [
+        {
+            "Id": "<management-account>",
+            "Arn": "arn:aws:organizations::<management-account>:account/<org-id>/<management-account>",
+            "Email": "<email>",
+            "Name": "Mike",
+            "Status": "ACTIVE",
+            "State": "ACTIVE",
+            "Paths": [
+                "<org-id>/r-f915/<management-account>/"
+            ],
+            "JoinedMethod": "INVITED",
+            "JoinedTimestamp": "2026-07-29T00:24:34.860000+03:00"
+        },
+        {
+            "Id": "<workloads-account>",
+            "Arn": "arn:aws:organizations::<management-account>:account/<org-id>/<workloads-account>",
+            "Email": "<email>",
+            "Name": "novapay-workloads",
+            "Status": "ACTIVE",
+            "State": "ACTIVE",
+            "Paths": [
+                "<org-id>/r-f915/<ou-id>/<workloads-account>/"
+            ],
+            "JoinedMethod": "CREATED",
+            "JoinedTimestamp": "2026-08-07T23:06:36.471000+03:00"
+        },
+        {
+            "Id": "<security-account>",
+            "Arn": "arn:aws:organizations::<management-account>:account/<org-id>/<security-account>",
+            "Email": "<email>",
+            "Name": "novapay-security",
+            "Status": "ACTIVE",
+            "State": "ACTIVE",
+            "Paths": [
+                "<org-id>/r-f915/<ou-id>/<security-account>/"
+            ],
+            "JoinedMethod": "CREATED",
+            "JoinedTimestamp": "2026-08-07T23:06:35.725000+03:00"
+        }
+    ]
+}
+
+$ aws organizations list-roots
+{
+    "Roots": [
+        {
+            "Id": "r-f915",
+            "Arn": "arn:aws:organizations::<management-account>:root/<org-id>/r-f915",
+            "Name": "Root",
+            "PolicyTypes": [
+                {
+                    "Type": "SERVICE_CONTROL_POLICY",
+                    "Status": "ENABLED"
+                }
+            ]
+        }
+    ]
+}
+
+==============================================================
+2. Service control policies: three of them, and where they attach
+==============================================================
+
+$ aws organizations list-policies --filter SERVICE_CONTROL_POLICY
+{
+    "Policies": [
+        {
+            "Id": "p-FullAWSAccess",
+            "Arn": "arn:aws:organizations::aws:policy/service_control_policy/p-FullAWSAccess",
+            "Name": "FullAWSAccess",
+            "Description": "Allows access to every operation",
+            "Type": "SERVICE_CONTROL_POLICY",
+            "AwsManaged": true
+        },
+        {
+            "Id": "p-wgirycnf",
+            "Arn": "arn:aws:organizations::<management-account>:policy/<org-id>/service_control_policy/p-wgirycnf",
+            "Name": "novapay-workloads-guardrails",
+            "Description": "",
+            "Type": "SERVICE_CONTROL_POLICY",
+            "AwsManaged": false
+        }
+    ]
+}
+
+==============================================================
+3. Organisation CloudTrail: multi-region, validated, customer-managed key
+==============================================================
+
+# The claim that failed last time was encryption. A KmsKeyId here is
+# necessary but not sufficient: CloudTrail sets encryption on its own
+# PutObject, so an object in the bucket is the thing that settles it.
+
+$ aws cloudtrail get-trail --name novapay-org-trail --region eu-west-1
+{
+    "Trail": {
+        "Name": "novapay-org-trail",
+        "S3BucketName": "novapay-cloudtrail-logs-<management-account>",
+        "IncludeGlobalServiceEvents": true,
+        "IsMultiRegionTrail": true,
+        "HomeRegion": "eu-west-1",
+        "TrailARN": "arn:aws:cloudtrail:eu-west-1:<management-account>:trail/novapay-org-trail",
+        "LogFileValidationEnabled": true,
+        "HasCustomEventSelectors": false,
+        "HasInsightSelectors": false,
+        "IsOrganizationTrail": true
+    }
+}
+
+$ aws cloudtrail get-trail-status --name novapay-org-trail --region eu-west-1
+{
+    "IsLogging": true,
+    "LatestDeliveryTime": "2026-09-06T20:23:04.591000+03:00",
+    "StartLoggingTime": "2026-07-29T01:51:40.793000+03:00",
+    "LatestDigestDeliveryTime": "2026-09-06T20:02:50.361000+03:00",
+    "LatestDeliveryAttemptTime": "2026-09-06T17:23:04Z",
+    "LatestNotificationAttemptTime": "",
+    "LatestNotificationAttemptSucceeded": "",
+    "LatestDeliveryAttemptSucceeded": "2026-09-06T17:23:04Z",
+    "TimeLoggingStarted": "2026-07-28T22:51:40Z",
+    "TimeLoggingStopped": ""
+}
+
+# All trails in the account. A second trail outside Terraform is a known
+# gap, and this is where it shows up rather than in prose.
+
+$ aws cloudtrail list-trails
+{
+    "Trails": [
+        {
+            "TrailARN": "arn:aws:cloudtrail:eu-north-1:<management-account>:trail/management-events",
+            "Name": "management-events",
+            "HomeRegion": "eu-north-1"
+        },
+        {
+            "TrailARN": "arn:aws:cloudtrail:eu-west-1:<management-account>:trail/novapay-org-trail",
+            "Name": "novapay-org-trail",
+            "HomeRegion": "eu-west-1"
+        }
+    ]
+}
+
+==============================================================
+4. GuardDuty administered from the Security account
+==============================================================
+
+$ aws guardduty list-organization-admin-accounts --region eu-west-1
+{
+    "AdminAccounts": [
+        {
+            "AdminAccountId": "<management-account>",
+            "AdminStatus": "ENABLED"
+        }
+    ]
+}
+
+$ aws guardduty list-detectors --region eu-west-1
+{
+    "DetectorIds": [
+        "42cfeeeacbc4d470efdacf85aa00f115"
+    ]
+}
+
+==============================================================
+5. Security Hub administered from the Security account
+==============================================================
+
+$ aws securityhub list-organization-admin-accounts --region eu-west-1
+{
+    "AdminAccounts": [
+        {
+            "AccountId": "<management-account>",
+            "Status": "ENABLED"
+        }
+    ],
+    "Feature": "SecurityHub"
+}
+
+==============================================================
+6. Account baseline: password policy, Access Analyzer, EBS, contacts
+==============================================================
+
+$ aws iam get-account-password-policy
+
+aws: [ERROR]: An error occurred (NoSuchEntity) when calling the GetAccountPasswordPolicy operation: The Password Policy with domain name <management-account> cannot be found.
+[command failed: exit 254]
+
+$ aws accessanalyzer list-analyzers --region eu-west-1
+{
+    "analyzers": []
+}
+
+$ aws ec2 get-ebs-encryption-by-default --region eu-west-1
+{
+    "EbsEncryptionByDefault": false
+}
+
+$ aws account get-alternate-contact --alternate-contact-type SECURITY
+
+aws: [ERROR]: An error occurred (ResourceNotFoundException) when calling the GetAlternateContact operation: No contact of the inputted alternate contact type found.
+
+Additional error details:
+errorType: ResourceNotFoundException
+[command failed: exit 254]
+
+==============================================================
+7. KMS: both keys present, rotation on
+==============================================================
+
+$ aws kms list-aliases --region eu-west-1
+{
+    "Aliases": [
+        {
+            "AliasName": "alias/aws/dynamodb",
+            "AliasArn": "arn:aws:kms:eu-west-1:<management-account>:alias/aws/dynamodb"
+        },
+        {
+            "AliasName": "alias/aws/ebs",
+            "AliasArn": "arn:aws:kms:eu-west-1:<management-account>:alias/aws/ebs",
+            "TargetKeyId": "52d495a2-62c4-48a7-a80b-42eed8db4aab",
+            "CreationDate": "2026-09-05T20:18:35.338000+03:00",
+            "LastUpdatedDate": "2026-09-05T20:18:35.338000+03:00"
+        },
+        {
+            "AliasName": "alias/aws/elasticfilesystem",
+            "AliasArn": "arn:aws:kms:eu-west-1:<management-account>:alias/aws/elasticfilesystem"
+        },
+        {
+            "AliasName": "alias/aws/es",
+            "AliasArn": "arn:aws:kms:eu-west-1:<management-account>:alias/aws/es"
+        },
+        {
+            "AliasName": "alias/aws/glue",
+            "AliasArn": "arn:aws:kms:eu-west-1:<management-account>:alias/aws/glue"
+        },
+        {
+            "AliasName": "alias/aws/kinesisvideo",
+            "AliasArn": "arn:aws:kms:eu-west-1:<management-account>:alias/aws/kinesisvideo"
+        },
+        {
+            "AliasName": "alias/aws/rds",
+            "AliasArn": "arn:aws:kms:eu-west-1:<management-account>:alias/aws/rds"
+        },
+        {
+            "AliasName": "alias/aws/redshift",
+            "AliasArn": "arn:aws:kms:eu-west-1:<management-account>:alias/aws/redshift"
+        },
+        {
+            "AliasName": "alias/aws/redshifttest",
+            "AliasArn": "arn:aws:kms:eu-west-1:<management-account>:alias/aws/redshifttest"
+        },
+        {
+            "AliasName": "alias/aws/s3",
+            "AliasArn": "arn:aws:kms:eu-west-1:<management-account>:alias/aws/s3"
+        },
+        {
+            "AliasName": "alias/aws/secretsmanager",
+            "AliasArn": "arn:aws:kms:eu-west-1:<management-account>:alias/aws/secretsmanager",
+            "TargetKeyId": "37925362-0a16-4f88-9651-ea077d805496",
+            "CreationDate": "2026-07-17T03:49:08.879000+03:00",
+            "LastUpdatedDate": "2026-07-17T03:49:08.879000+03:00"
+        },
+        {
+            "AliasName": "alias/aws/ssm",
+            "AliasArn": "arn:aws:kms:eu-west-1:<management-account>:alias/aws/ssm"
+        },
+        {
+            "AliasName": "alias/aws/xray",
+            "AliasArn": "arn:aws:kms:eu-west-1:<management-account>:alias/aws/xray"
+        },
+        {
+            "AliasName": "alias/novapay-cloudtrail-key",
+            "AliasArn": "arn:aws:kms:eu-west-1:<management-account>:alias/novapay-cloudtrail-key",
+            "TargetKeyId": "83146099-de2f-4351-b4e7-675165a648b2",
+            "CreationDate": "2026-08-08T16:42:23.330000+03:00",
+            "LastUpdatedDate": "2026-08-08T16:42:23.330000+03:00"
+        }
+    ]
+}
+
+==============================================================
+8. Terraform state bucket: versioned, public access blocked
+==============================================================
+
+$ aws s3api get-bucket-versioning --bucket novapay-tfstate-<management-account>
+{
+    "Status": "Enabled"
+}
+
+$ aws s3api get-public-access-block --bucket novapay-tfstate-<management-account>
+{
+    "PublicAccessBlockConfiguration": {
+        "BlockPublicAcls": true,
+        "IgnorePublicAcls": true,
+        "BlockPublicPolicy": true,
+        "RestrictPublicBuckets": true
+    }
+}
+
+==============================================================
+9. Identity Center: instance and permission set
+==============================================================
+
+$ aws sso-admin list-instances --region eu-west-1
+{
+    "Instances": [
+        {
+            "InstanceArn": "arn:aws:sso:::instance/-<redacted>",
+            "IdentityStoreId": "d-93679f85f3",
+            "OwnerAccountId": "<management-account>",
+            "CreatedDate": "2026-08-07T23:32:42.473000+03:00",
+            "Status": "ACTIVE"
+        }
+    ]
+}
+
+==============================================================
+10. Cost: what the estate actually bills
+==============================================================
+
+$ aws ce get-cost-and-usage --time-period Start=2026-09-01,End=2026-09-06 --granularity MONTHLY --metrics UnblendedCost --group-by Type=DIMENSION,Key=SERVICE
+{
+    "GroupDefinitions": [
+        {
+            "Type": "DIMENSION",
+            "Key": "SERVICE"
+        }
+    ],
+    "ResultsByTime": [
+        {
+            "TimePeriod": {
+                "Start": "2026-09-01",
+                "End": "2026-09-06"
+            },
+            "Total": {},
+            "Groups": [
+                {
+                    "Keys": [
+                        "AWS CloudTrail"
+                    ],
+                    "Metrics": {
+                        "UnblendedCost": {
+                            "Amount": "0.38316",
+                            "Unit": "USD"
+                        }
+                    }
+                },
+                {
+                    "Keys": [
+                        "AWS Glue"
+                    ],
+                    "Metrics": {
+                        "UnblendedCost": {
+                            "Amount": "0",
+                            "Unit": "USD"
+                        }
+                    }
+                },
+                {
+                    "Keys": [
+                        "AWS Key Management Service"
+                    ],
+                    "Metrics": {
+                        "UnblendedCost": {
+                            "Amount": "0.333333336",
+                            "Unit": "USD"
+                        }
+                    }
+                },
+                {
+                    "Keys": [
+                        "AWS Secrets Manager"
+                    ],
+                    "Metrics": {
+                        "UnblendedCost": {
+                            "Amount": "0.066696672",
+                            "Unit": "USD"
+                        }
+                    }
+                },
+                {
+                    "Keys": [
+                        "AWS WAF"
+                    ],
+                    "Metrics": {
+                        "UnblendedCost": {
+                            "Amount": "1.500000012",
+                            "Unit": "USD"
+                        }
+                    }
+                },
+                {
+                    "Keys": [
+                        "EC2 - Other"
+                    ],
+                    "Metrics": {
+                        "UnblendedCost": {
+                            "Amount": "0.0001504691",
+                            "Unit": "USD"
+                        }
+                    }
+                },
+                {
+                    "Keys": [
+                        "Amazon Elastic Compute Cloud - Compute"
+                    ],
+                    "Metrics": {
+                        "UnblendedCost": {
+                            "Amount": "0.001653",
+                            "Unit": "USD"
+                        }
+                    }
+                },
+                {
+                    "Keys": [
+                        "Amazon GuardDuty"
+                    ],
+                    "Metrics": {
+                        "UnblendedCost": {
+                            "Amount": "0",
+                            "Unit": "USD"
+                        }
+                    }
+                },
+                {
+                    "Keys": [
+                        "Amazon Simple Notification Service"
+                    ],
+                    "Metrics": {
+                        "UnblendedCost": {
+                            "Amount": "0",
+                            "Unit": "USD"
+                        }
+                    }
+                },
+                {
+                    "Keys": [
+                        "Amazon Simple Storage Service"
+                    ],
+                    "Metrics": {
+                        "UnblendedCost": {
+                            "Amount": "0.1133132539",
+                            "Unit": "USD"
+                        }
+                    }
+                },
+                {
+                    "Keys": [
+                        "Amazon Virtual Private Cloud"
+                    ],
+                    "Metrics": {
+                        "UnblendedCost": {
+                            "Amount": "0.0000071002",
+                            "Unit": "USD"
+                        }
+                    }
+                },
+                {
+                    "Keys": [
+                        "AmazonCloudWatch"
+                    ],
+                    "Metrics": {
+                        "UnblendedCost": {
+                            "Amount": "0",
+                            "Unit": "USD"
+                        }
+                    }
+                },
+                {
+                    "Keys": [
+                        "Tax"
+                    ],
+                    "Metrics": {
+                        "UnblendedCost": {
+                            "Amount": "0.6",
+                            "Unit": "USD"
+                        }
+                    }
+                }
+            ],
+            "Estimated": true
+        }
+    ],
+    "DimensionValueAttributes": []
+}
+
+# Not captured here, because no API returns them. Screenshot these two:
+#   - root MFA on each of the three accounts (IAM console, per account)
+#   - the confirmed SNS subscription email in the inbox
