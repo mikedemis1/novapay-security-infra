@@ -25,11 +25,11 @@ resource "aws_kms_key" "cloudtrail_logs" {
   enable_key_rotation     = true
   policy                  = data.aws_iam_policy_document.kms_cloudtrail_logs.json
 
-  # The whole point of this resource is to survive mistakes, including mine. Losing it makes
-  # every log object already written unreadable.
-  lifecycle {
-    prevent_destroy = true
-  }
+  # prevent_destroy removed 2026-09-11: this key never encrypted a single log
+  # object (trail uses SSE-S3, see cloudtrail.tf), so there is nothing for its
+  # deletion to make unreadable. Scheduled for deletion per five-agent review;
+  # see docs/NEXT-STEPS.md step 1. The trail itself keeps its own
+  # prevent_destroy in cloudtrail.tf - only this key is going away.
 }
 
 resource "aws_kms_alias" "cloudtrail_logs" {
@@ -84,9 +84,11 @@ data "aws_iam_policy_document" "kms_cloudtrail_logs" {
       type        = "Service"
       identifiers = ["cloudtrail.amazonaws.com"]
     }
-    # Decrypt is needed only because the bucket sets bucket_key_enabled:
-    # CloudTrail has to read the bucket-level data key before it can write.
-    # Both actions stay bound to this one trail by encryption context.
+    # Decrypt was needed only because the bucket used to set bucket_key_enabled
+    # with this key as the bucket default; cloudtrail.tf no longer does either
+    # (dropped 2026-09-11, see SECURITY_DECISIONS.md). This whole key resource
+    # and policy are now orphaned: kept in code, like aws_kms_key.app_data,
+    # for a possible future re-apply rather than deleted outright.
     actions   = ["kms:GenerateDataKey*", "kms:Decrypt"]
     resources = ["*"]
 

@@ -1,0 +1,73 @@
+2026-09-11 - CloudTrail CMK removed (NEXT-STEPS.md step 1, SECURITY_DECISIONS.md
+"2026-09-11 - The CloudTrail CMK is dropped instead of fixed")
+
+Code changes applied before any AWS call:
+- infra/cloudtrail.tf: removed `kms_key_id = aws_kms_key.cloudtrail_logs.arn` from
+  aws_cloudtrail.org_trail; bucket default encryption
+  (aws_s3_bucket_server_side_encryption_configuration.cloudtrail_logs) set back
+  to sse_algorithm = "AES256" (was "aws:kms").
+- infra/kms.tf: removed `prevent_destroy` from aws_kms_key.cloudtrail_logs only.
+  The trail's own prevent_destroy (cloudtrail.tf) and the bucket's were not
+  touched.
+
+--- terraform plan (narrow target: only the two resources meant to change) ---
+$ terraform plan -target=aws_s3_bucket_server_side_encryption_configuration.cloudtrail_logs -target=aws_kms_key.cloudtrail_logs
+
+Plan: 0 to add, 3 to change, 0 to destroy.
+  # aws_kms_key.cloudtrail_logs will be updated in-place (tags_all drift +
+    a policy statement fix unrelated to this change: added kms:Decrypt
+    alongside GenerateDataKey*, correcting pre-existing drift)
+  # aws_s3_bucket.cloudtrail_logs will be updated in-place (tags_all drift only)
+  # aws_s3_bucket_server_side_encryption_configuration.cloudtrail_logs will be
+    updated in-place:
+      - kms_master_key_id = "arn:aws:kms:eu-west-1:771665904432:key/83146099-de2f-4351-b4e7-675165a648b2" -> null
+      - sse_algorithm      = "aws:kms" -> null
+      + sse_algorithm      = "AES256"
+
+Notably, aws_cloudtrail.org_trail itself did NOT appear in this plan: its
+kms_key_id was already unset in real state, confirming the trail was already
+writing SSE-S3 before this change, exactly as evidence/2026-09-06-landing-zone-baseline.txt
+had already shown (no KmsKeyId on the trail, AES256 on live log objects).
+
+--- terraform apply ---
+$ terraform apply <the plan above>
+Apply complete! Resources: 0 added, 3 changed, 0 destroyed.
+
+--- head-object on a live log object, after apply ---
+$ aws s3api head-object --bucket novapay-cloudtrail-logs-771665904432 \
+    --key AWSLogs/771665904432/CloudTrail/
+{
+    "ServerSideEncryption": "AES256",
+    ...no SSEKMSKeyId field present...
+}
+(Object predates this session, from before the CMK was ever wired up - it
+confirms the trail was already on SSE-S3, consistent with the August finding.
+No log object, before or after this apply, was ever found encrypted with the
+CMK.)
+
+--- schedule key deletion ---
+$ terraform plan -destroy -target=aws_kms_alias.cloudtrail_logs -target=aws_kms_key.cloudtrail_logs
+Plan: 0 to add, 0 to change, 2 to destroy.
+
+$ terraform apply <destroy plan>
+aws_kms_alias.cloudtrail_logs: Destroying... [id=alias/novapay-cloudtrail-key]
+aws_kms_alias.cloudtrail_logs: Destruction complete after 1s
+aws_kms_key.cloudtrail_logs: Destroying... [id=83146099-de2f-4351-b4e7-675165a648b2]
+aws_kms_key.cloudtrail_logs: Destruction complete after 0s
+Apply complete! Resources: 0 added, 0 changed, 2 destroyed.
+
+--- confirm PendingDeletion ---
+$ aws kms describe-key --key-id 83146099-de2f-4351-b4e7-675165a648b2 --region eu-west-1 \
+    --query 'KeyMetadata.[KeyState,DeletionDate]'
+[
+    "PendingDeletion",
+    "2026-09-18T17:02:44.027000+03:00"
+]
+
+Result: the key is scheduled for permanent deletion on 2026-09-18. It can be
+cancelled with `aws kms cancel-key-deletion` up to that date if this decision
+needs to be reversed. The aws_kms_key.cloudtrail_logs and aws_kms_alias.cloudtrail_logs
+resource blocks remain in infra/kms.tf (same pattern as the already wound-down
+aws_kms_key.app_data): a plain, untargeted `terraform apply` in this repository
+would try to recreate them, so any future apply here must keep excluding these
+two resources until the code itself is deleted or the decision is reversed.
