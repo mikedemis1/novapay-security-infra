@@ -164,6 +164,14 @@ Workloads (277606037083):
   $ aws s3control get-public-access-block     all four true
   $ aws ec2 get-ebs-encryption-by-default --region eu-west-1
     {"EbsEncryptionByDefault": true}
+  $ aws account get-alternate-contact ...     NovaPay Security / Security Contact
+
+EBS encryption by default is read back in Workloads only, because
+aws_ebs_encryption_by_default.workloads is the only one of these in the
+configuration: the setting is per-account-per-region, and Workloads is the only
+account that runs EC2. The setting reads back true in the management account
+too, but nothing in this repository set it there, so that is not evidence of
+anything and is not counted as a control.
 
 Security (547090165470):
 

@@ -30,7 +30,7 @@ Three kinds of row, because they are three different claims.
 | S3 protection and malware protection, enabled through organisation configuration | written, never applied |
 | IAM Identity Center with an administrator permission set | live |
 | HIGH and CRITICAL findings emailed through EventBridge and SNS | rule and topic still exist; nothing can fire them since detection was wound down |
-| Account baseline: public access block, password policy, Access Analyzer, EBS encryption, security contact | live 2026-09-11, read back per account |
+| Account baseline: public access block, password policy, Access Analyzer, EBS encryption, security contact | live 2026-09-11, read back in each account it applies to — EBS encryption by default is Workloads only, since it is the only account that runs EC2, and the Access Analyzer is one organisation-wide analyzer |
 | VPC across two availability zones, three subnet tiers, chained security groups | live |
 | Customer-managed KMS key for the log bucket, rotating | wound down 2026-09-11 (scheduled for deletion, 7-day window to 2026-09-18); it existed but never actually encrypted a log object, see below |
 | Customer-managed KMS key for application data, rotating | wound down 2026-09-06 |
@@ -52,8 +52,9 @@ deliberately and recorded rather than left to drift: see
 
 Two of those rows stopped being written rows on 2026-09-11. The service control
 policies and the account baseline cost nothing to run, so the cost decision
-never applied to them — they were simply blocked behind the detection move, and
-they are not. Both went on with targeted applies rather than a bare
+never applied to them — they were blocked behind the detection move, which is a
+different reason and one that never justified leaving them off this long. Both
+went on with targeted applies rather than a bare
 `terraform apply`, which in this repository would also recreate three
 deliberately wound-down resources whose code is kept on purpose;
 `docs/NEXT-STEPS.md` carries the exact target lists and the reason. Read back
