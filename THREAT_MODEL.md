@@ -60,30 +60,47 @@ distinguishes what is enforced from what is only written.
 
 | STRIDE | Threat | Control | Status |
 |---|---|---|---|
-| Repudiation | Member account stops or deletes its own trail | `DenyTrailTampering`: `cloudtrail:StopLogging`, `cloudtrail:DeleteTrail` | live on the Workloads unit only |
-| Repudiation | Trail narrowed rather than deleted, so it stays green and records nothing | nothing denies `UpdateTrail` or `PutEventSelectors` | **gap: claimed live, never existed** |
-| Tampering | Detection disabled in a member account | `DenyGuardDutyTampering`: `guardduty:DeleteDetector`, `guardduty:DisassociateFromMasterAccount` | live on Workloads only, GuardDuty only, and GuardDuty was wound down on 2026-09-06, so it now guards nothing |
-| Elevation | Account leaves the organisation to escape the guardrails | `DenyLeavingOrganization`: `organizations:LeaveOrganization` | live on the Workloads unit; not at the root, and `CloseAccount` is not denied |
-| Tampering | Resources created outside the EU | region deny | **gap: claimed live, never existed** |
+| Repudiation | Member account stops or deletes its own trail | `DenyTrailTampering`: `cloudtrail:StopLogging`, `cloudtrail:DeleteTrail` | live on both units since 2026-09-11 (`novapay-protect-security-services`, `p-znh6pzob`) |
+| Repudiation | Trail narrowed rather than deleted, so it stays green and records nothing | `DenyTrailTampering` also denies `cloudtrail:UpdateTrail` and `cloudtrail:PutEventSelectors` | closed 2026-09-11; attached to both units, not tamper-tested (see below) |
+| Tampering | Detection disabled in a member account | `DenyGuardDutyTampering`, `DenySecurityHubTampering`, `DenyConfigTampering` | policy live on both units since 2026-09-11, but GuardDuty and Security Hub were wound down on 2026-09-06, so it currently guards services that are not running |
+| Elevation | Account leaves the organisation to escape the guardrails | `DenyLeavingOrganization`: `organizations:LeaveOrganization` and `account:CloseAccount` | live at the root since 2026-09-11 (`novapay-base-guardrails`, `p-8ryv7lhp`), so it covers every account in the organisation, and `CloseAccount` is now denied too |
+| Tampering | Resources created outside the EU | region deny, `eu-west-1` only, global services excluded by `NotAction` | live on both units since 2026-09-11 (`novapay-region-deny`, `p-pyxqnvs4`) and **tested**: `ec2:DescribeVpcs` in `eu-central-1` refused from inside both member accounts with an explicit deny naming that policy id |
 
-**The Security account is governed by nothing.** `novapay-workloads-guardrails`
-is attached to the Workloads unit alone; the Security unit carries only
-`FullAWSAccess`. Every row above therefore stops at the boundary of one unit.
-The account this design nominates to hold detection is the account with no
-guardrails on it.
+**The Security account was governed by nothing, until 2026-09-11.**
+`novapay-workloads-guardrails` was attached to the Workloads unit alone; the
+Security unit carried only `FullAWSAccess`. The account this design nominates to
+hold detection was the account with no guardrails on it. It now carries
+`novapay-region-deny` and `novapay-protect-security-services`, and
+`novapay-base-guardrails` sits at the root, above both units. The old
+single-unit policy is still attached as well, and is destroyed by
+`docs/runbooks/move-detection-to-security-account.md` in the detection move.
 
-**The narrowing row is the one to read twice.** `ARCHITECTURE.md` argues, in the
-guardrails section, that narrowing is the failure that matters, because a trail
-updated to record almost nothing still exists and still reports healthy. The
-policy that was supposed to answer that denies `StopLogging` and `DeleteTrail`
-and says nothing about `UpdateTrail`. The document identified the attack
-correctly and then marked the control live without checking it, for weeks.
+**The narrowing row was the one to read twice.** `ARCHITECTURE.md` argues, in
+the guardrails section, that narrowing is the failure that matters, because a
+trail updated to record almost nothing still exists and still reports healthy.
+The policy that was supposed to answer that denied `StopLogging` and
+`DeleteTrail` and said nothing about `UpdateTrail`. The document identified the
+attack correctly and then marked the control live without checking it, for
+weeks. `novapay-protect-security-services` denies `UpdateTrail` and
+`PutEventSelectors` as well, and it is applied.
 
 Nothing in this repository could have caught any of it. Checkov and Conftest
 read the Terraform that was written, and the policies here were written; they
 were simply never applied, and no scanner reads an organisation. It took
 `aws organizations describe-policy` against the live account, which is the whole
 argument for periodic verification against a source that is not the code.
+
+**What the 2026-09-11 verification does and does not prove.** The region deny
+was tested the only way a deny can honestly be tested: by making the denied call
+from inside each member account and reading the refusal, which names the policy
+id. The trail, GuardDuty, Security Hub and Config denies in
+`protect_security_services` were not tested that way, because the only real test
+of a deny on `cloudtrail:StopLogging` is to call `StopLogging`, and a policy not
+in force would then stop the organisation trail — the one detective control
+still running. They share a mechanism with the deny that was tested, and they
+are attached; that is weaker evidence than the region row has, and this
+paragraph exists so the difference is not quietly rounded up. Read back in
+`evidence/2026-09-11-scps-and-account-baseline.txt`.
 
 **What no policy on this boundary protects.** Service control policies do not apply to the management account. It holds the organisation, the log bucket, the log key and the Terraform state, and the only things standing in front of it are root MFA and its IAM configuration. Two administrator IAM users with long-lived keys exist there, one without MFA, created in the console and therefore invisible to every scanner in this repository. That is the single largest gap in the model and it is not fixable in Terraform.
 

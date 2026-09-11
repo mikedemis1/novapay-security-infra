@@ -1,0 +1,224 @@
+2026-09-11 - Service control policies and the account baseline applied
+(docs/NEXT-STEPS.md step 2)
+
+Everything below is read back from AWS after the apply, not from the Terraform
+code. That distinction is the whole reason this step exists: README.md's "What
+broke" records a threat model that called five guardrails enforced when two
+had never been applied at all, including this region deny, and the Security
+account carried no service control policy whatsoever.
+
+Applied with two targeted applies, never a bare `terraform apply`. A bare
+apply here is 24 to add / 18 to change / 2 to destroy and would recreate
+aws_kms_key.app_data, aws_secretsmanager_secret.db_credentials and
+aws_kms_key.cloudtrail_logs - three resources whose code remains while their
+live instances are deliberately gone. See NEXT-STEPS.md step 2 for why.
+
+
+--- Apply 1: the three service control policies ---
+$ terraform apply scp.tfplan
+Apply complete! Resources: 8 added, 3 changed, 0 destroyed.
+
+  aws_organizations_policy.base_guardrails            p-8ryv7lhp
+  aws_organizations_policy.protect_security_services  p-znh6pzob
+  aws_organizations_policy.region_deny                p-pyxqnvs4
+  + 5 attachments (base at the root; the other two on both units)
+
+The 3 in-place changes were tag propagation onto the organisation and the two
+organisational units, plus access-analyzer.amazonaws.com added to the
+organisation's service access principals (the ORGANIZATION-type analyzer in
+apply 2 cannot be created without it).
+
+
+--- Apply 2: the account baseline ---
+$ terraform apply baseline.tfplan
+Apply complete! Resources: 11 added, 2 changed, 0 destroyed.
+
+  password policy, S3 account-level public access block,
+  and a SECURITY alternate contact on all three accounts;
+  EBS encryption by default in Workloads;
+  aws_accessanalyzer_analyzer.org (ORGANIZATION type, eu-west-1)
+
+The 2 in-place changes were tag propagation onto the two member account
+resources.
+
+
+--- Read back: the policies exist and are attached where intended ---
+$ aws organizations list-policies --filter SERVICE_CONTROL_POLICY
+
+  novapay-base-guardrails            p-8ryv7lhp
+  novapay-protect-security-services  p-znh6pzob
+  novapay-region-deny                p-pyxqnvs4
+  novapay-workloads-guardrails       p-wgirycnf   <- the old one, see below
+  FullAWSAccess                      p-FullAWSAccess (AWS managed)
+
+$ aws organizations list-policies-for-target --target-id r-f915              (root)
+  FullAWSAccess, novapay-base-guardrails
+
+$ aws organizations list-policies-for-target --target-id ou-f915-bvzrbudp    (Security)
+  FullAWSAccess, novapay-region-deny, novapay-protect-security-services
+
+$ aws organizations list-policies-for-target --target-id ou-f915-pkfqytr1    (Workloads)
+  FullAWSAccess, novapay-region-deny, novapay-protect-security-services,
+  novapay-workloads-guardrails
+
+The Security unit now carries two policies. Before this apply it carried none,
+which is the single worst finding in README.md's "What broke".
+
+
+--- The old policy is still attached, deliberately ---
+
+novapay-workloads-guardrails (p-wgirycnf) is no longer in the Terraform
+configuration, so a plan shows it and its attachment as 2 to destroy. They are
+left in place until step 3, whose runbook
+(docs/runbooks/move-detection-to-security-account.md) already names both in its
+destroy list.
+
+This ordering is better than the one that runbook assumed. It predicted "a gap
+of seconds between the old guardrail policy being detached and the new ones
+attaching, during which the Workloads unit is governed by no service control
+policy", and accepted that gap in writing. Applying the three new policies
+first, as NEXT-STEPS.md step 2 does, removes the gap entirely: the unit is
+over-governed for a few days rather than ungoverned for a few seconds. The
+runbook's note is now stale in the user's favour.
+
+
+--- Read back: the region deny actually denies ---
+
+Tested by assuming OrganizationAccountAccessRole into each member account and
+making read-only calls. A policy that exists is not a policy that bites; this
+is the difference.
+
+Workloads (277606037083),
+arn:aws:sts::277606037083:assumed-role/OrganizationAccountAccessRole/scp-verification
+
+  $ aws ec2 describe-vpcs --region eu-west-1
+    vpc-0f46e5d66fac2ea90  vpc-0c7512967a12869d5          <- allowed
+
+  $ aws ec2 describe-vpcs --region eu-central-1
+    UnauthorizedOperation: ... is not authorized to perform: ec2:DescribeVpcs
+    with an explicit deny in a service control policy:
+    arn:aws:organizations::771665904432:policy/o-tcspyaifkn/service_control_policy/p-pyxqnvs4
+
+  $ aws ec2 describe-instances --region eu-north-1
+    UnauthorizedOperation: ... explicit deny in a service control policy:
+    ... p-pyxqnvs4
+
+  $ aws iam list-account-aliases
+    {"AccountAliases": []}                                 <- global service,
+    still allowed, which is the NotAction list doing its job
+
+Security (547090165470)
+
+  $ aws ec2 describe-vpcs --region eu-central-1
+    UnauthorizedOperation: ... explicit deny in a service control policy:
+    ... p-pyxqnvs4
+
+The error names the policy id, so this is the deny under test and not some
+other permission boundary.
+
+No tamper test was run against CloudTrail, GuardDuty or Security Hub. The only
+honest test of a deny on cloudtrail:StopLogging is to call StopLogging, and if
+the policy were not in force that call would succeed and stop the organisation
+trail - the one detective control currently running. The region deny above is
+evidence the same mechanism is in force; protect_security_services is left
+verified by attachment only, and this paragraph is here so that limit is not
+mistaken for a pass.
+
+
+--- Read back: the baseline, per account ---
+
+Management (771665904432), as user/cli-admin:
+
+  $ aws iam get-account-password-policy
+    MinimumPasswordLength 14, RequireSymbols true, RequireNumbers true,
+    RequireUppercase true, RequireLowercase true, MaxPasswordAge 90,
+    PasswordReusePrevention 24, AllowUsersToChangePassword true
+
+  $ aws s3control get-public-access-block --account-id 771665904432
+    BlockPublicAcls, IgnorePublicAcls, BlockPublicPolicy,
+    RestrictPublicBuckets: all true
+
+  $ aws account get-alternate-contact --alternate-contact-type SECURITY
+    NovaPay Security / Security Contact / [email redacted]
+
+    Redacted deliberately. No email address appears in any tracked file in
+    this repository, and that is not an accident: README.md's "What broke"
+    records two branches carrying real account root emails that stayed
+    fetchable by SHA after being deleted. The address is set from
+    infra/terraform.tfvars, which infra/.gitignore excludes. The read-back
+    matters; the value does not.
+
+  $ aws accessanalyzer list-analyzers --region eu-west-1
+    arn:aws:access-analyzer:eu-west-1:771665904432:analyzer/novapay-org-external-access
+    type ORGANIZATION, createdAt 2026-09-11T15:48:56+00:00, status CREATING
+
+    Note: the same call with no --region returned an empty list, because this
+    environment's default CLI region is eu-north-1 while every provider in
+    infra/providers.tf is eu-west-1. An analyzer is regional. Reading a control
+    back in the wrong region is a good way to report a control missing that is
+    not, or present that is not.
+
+Workloads (277606037083):
+
+  $ aws iam get-account-password-policy      14 / 24 / 90
+  $ aws s3control get-public-access-block     all four true
+  $ aws ec2 get-ebs-encryption-by-default --region eu-west-1
+    {"EbsEncryptionByDefault": true}
+  $ aws account get-alternate-contact ...     NovaPay Security / Security Contact
+
+EBS encryption by default is read back in Workloads only, because
+aws_ebs_encryption_by_default.workloads is the only one of these in the
+configuration: the setting is per-account-per-region, and Workloads is the only
+account that runs EC2. The setting reads back true in the management account
+too, but nothing in this repository set it there, so that is not evidence of
+anything and is not counted as a control.
+
+Security (547090165470):
+
+  $ aws iam get-account-password-policy      14 / 24 / 90
+  $ aws s3control get-public-access-block     all four true
+  $ aws account get-alternate-contact ...     NovaPay Security / [email redacted]
+
+
+--- Read back: a full plan afterwards, to prove nothing else moved ---
+$ terraform plan
+Plan: 24 to add, 18 to change, 2 to destroy
+
+Every address accounted for:
+
+  2 to destroy   the old novapay-workloads-guardrails policy and its
+                 attachment, as described above
+  to add         GuardDuty and Security Hub delegated to the Security account,
+                 their organisation configurations and protection plan features,
+                 and the high-severity finding event rule - all of step 3
+  to add         aws_kms_key.app_data, aws_kms_alias.app_data,
+                 aws_kms_key.cloudtrail_logs, aws_kms_alias.cloudtrail_logs,
+                 aws_secretsmanager_secret.db_credentials and its version -
+                 wound down on purpose, code deliberately kept, must not be
+                 applied
+  to add         aws_iam_role.policy_test, aws_iam_policy.read_only_d2,
+                 aws_iam_policy.deny_dangerous_actions and their attachments,
+                 which replace the long-lived-key test user, plus two S3
+                 lifecycle configurations. Written, still never applied; not
+                 part of step 2, not silently applied here either.
+  18 to change   tag propagation only (Project/Environment/ManagedBy onto the
+                 VPC, subnets, route tables, security groups, gateway, buckets,
+                 trail, budget, permission set)
+
+The plan also ends with the SNS AuthorizationError that
+docs/runbooks/move-detection-to-security-account.md predicts in its own step 0:
+
+  Error: reading SNS Topic (arn:aws:sns:eu-west-1:771665904432:novapay-security-alerts):
+  403 AuthorizationError: User: arn:aws:sts::547090165470:assumed-role/OrganizationAccountAccessRole/...
+  is not authorized to perform: SNS:GetTopicAttributes
+
+Expected, unchanged by this step, and the reason step 3 has a two-phase
+destroy-then-apply shape. It is not a new failure introduced here.
+
+
+--- Noted while verifying, not fixed here ---
+
+These calls ran as arn:aws:iam::771665904432:user/cli-admin, an IAM user with a
+long-lived access key in the management account. NEXT-STEPS.md step 4 is to
+delete two such users. Whichever session does that must confirm what replaces
+this credential path before removing it, or it removes its own access.

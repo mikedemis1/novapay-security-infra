@@ -24,13 +24,18 @@ immediately after.
 ## Current state, as the README's control table has it today
 
 Read `README.md`'s "What is actually running" table directly; it is the
-source of truth and this file does not duplicate it. As of this writing, the
-rows still marked `written, never applied` are: the CloudTrail customer-managed
-key, the base/security-service-protection/region-deny SCPs, GuardDuty and
-Security Hub administered from the Security account, S3 and malware
-protection via organisation configuration, and the account baseline
+source of truth and this file does not duplicate it. When this file was
+written, the rows marked `written, never applied` were: the CloudTrail
+customer-managed key, the base/security-service-protection/region-deny SCPs,
+GuardDuty and Security Hub administered from the Security account, S3 and
+malware protection via organisation configuration, and the account baseline
 (public access block, password policy, Access Analyzer, EBS encryption,
 security contact).
+
+Steps 1 and 2 below closed the first, second and last of those on 2026-09-11.
+What remains written and never applied is the detection move (step 3), and,
+outside these steps, the IAM role that replaces the old test user's long-lived
+access key.
 
 ## What to do, in order
 
@@ -96,12 +101,26 @@ Test-day model: apply only the targets below, capture evidence into
 `evidence/`, decide same day whether the row stays live or gets wound down
 with the evidence kept as proof it ran.
 
-- [ ] Do step 1 (the KMS key removal) first — the plan above still shows
+**Done 2026-09-11.** Both applies ran, every control was read back from AWS
+rather than from the code, and the region deny was tested from inside both
+member accounts. Evidence: `evidence/2026-09-11-scps-and-account-baseline.txt`.
+
+- [x] Do step 1 (the KMS key removal) first — the plan above still shows
       `aws_cloudtrail.org_trail` and `aws_kms_key.cloudtrail_logs` as
       in-place updates from the *old* code; applying this step before step 1
-      would apply the key reference you are about to remove.
-- [ ] SCPs (replaces `workloads_guardrails` with three narrower policies —
-      expected, and named in the move-detection runbook's own destroy list):
+      would apply the key reference you are about to remove. Done 2026-09-11,
+      before this step.
+- [x] SCPs (replaces `workloads_guardrails` with three narrower policies —
+      expected, and named in the move-detection runbook's own destroy list).
+      Done 2026-09-11: 8 added, 3 changed, 0 destroyed. `base_guardrails`
+      `p-8ryv7lhp` at the root, `protect_security_services` `p-znh6pzob` and
+      `region_deny` `p-pyxqnvs4` on both units. The Security unit carried no
+      policy at all before this; it now carries two. The old
+      `novapay-workloads-guardrails` (`p-wgirycnf`) is still attached to
+      Workloads on purpose — it is step 3's runbook that destroys it, and
+      applying the new policies first means the unit is briefly
+      over-governed instead of ungoverned, closing the gap that runbook
+      predicted and accepted:
       ```
       terraform apply \
         -target=aws_organizations_policy.base_guardrails \
@@ -113,7 +132,13 @@ with the evidence kept as proof it ran.
         -target=aws_organizations_policy_attachment.region_deny_security \
         -target=aws_organizations_policy_attachment.region_deny_workloads
       ```
-- [ ] Account baseline:
+- [x] Account baseline. Done 2026-09-11: 11 added, 2 changed, 0 destroyed.
+      Password policy (14 / reuse 24 / age 90) and the S3 account-level public
+      access block read back true on all three accounts; EBS encryption by
+      default true in Workloads; the ORGANIZATION Access Analyzer created in
+      eu-west-1. Read an analyzer back with an explicit `--region` — this
+      environment's default CLI region is eu-north-1 and the call returns an
+      empty list there:
       ```
       terraform apply \
         -target=aws_s3_account_public_access_block.management \
@@ -128,9 +153,16 @@ with the evidence kept as proof it ran.
         -target=aws_account_alternate_contact.security_security \
         -target=aws_account_alternate_contact.workloads_security
       ```
-- [ ] Re-run a plain `terraform plan` after both, confirm the only remaining
+- [x] Re-run a plain `terraform plan` after both, confirm the only remaining
       diff is the app-data KMS key, the Secrets Manager secret, and the
       GuardDuty/Security Hub move (step 3 below) — nothing else unexplained.
+      Done 2026-09-11: 24 to add, 18 to change, 2 to destroy, every address
+      accounted for in the evidence file. Two things the original wording did
+      not anticipate, neither of them damage: the CloudTrail key and alias
+      joined the app-data key and the secret as code-kept/live-gone, and the
+      IAM policy-test role that replaces the long-lived-key test user is also
+      still unapplied. The 18 changes are tag propagation only, and the plan
+      still ends in the SNS `AuthorizationError` step 3's runbook predicts.
 
 ### 3. GuardDuty and Security Hub, administered from the Security account
 

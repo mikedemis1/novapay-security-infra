@@ -50,32 +50,40 @@ The database tier having no egress block at all is intentional and worth explain
 
 Service control policies do not grant anything. They set a ceiling that local IAM cannot raise, which is what makes them the answer to "the attacker got admin in that account".
 
-Three policies are written, attached at different levels because they answer
-different questions. **One of the three is attached.** The list below is the
-design; `novapay-workloads-guardrails`, on the Workloads unit, is the estate:
+Three policies, attached at different levels because they answer different
+questions. **All three are attached as of 2026-09-11**; before that only the
+superseded `novapay-workloads-guardrails` was, on the Workloads unit alone:
 
 - **Base guardrails**, at the organisation root: an account may not leave the organisation or close itself.
 - **Security-service protection**, on both units: logging and detection may not be stopped, deleted, disconnected or narrowed. Narrowing is the part that matters. A trail that has been updated to record almost nothing still exists and still looks healthy.
 - **Region deny**, on both units: resources only in eu-west-1, with the global services excluded, because denying those by region locks an account out of IAM and Organizations with no way back in.
 
-**What is actually enforced**, read back from the organisation on 2026-09-06
+**What is actually enforced**, read back from the organisation on 2026-09-11
 rather than from the code:
 
-| Sid | Actions | Attached to |
+| Policy | Sids | Attached to |
 |---|---|---|
-| `DenyTrailTampering` | `cloudtrail:StopLogging`, `cloudtrail:DeleteTrail` | Workloads unit |
-| `DenyGuardDutyTampering` | `guardduty:DeleteDetector`, `guardduty:DisassociateFromMasterAccount` | Workloads unit |
-| `DenyLeavingOrganization` | `organizations:LeaveOrganization` | Workloads unit |
+| `novapay-base-guardrails` (`p-8ryv7lhp`) | `DenyLeavingOrganization`: `organizations:LeaveOrganization`, `account:CloseAccount` | organisation root |
+| `novapay-protect-security-services` (`p-znh6pzob`) | `DenyTrailTampering` (incl. `UpdateTrail`, `PutEventSelectors`), `DenyGuardDutyTampering`, `DenySecurityHubTampering`, `DenyConfigTampering` | Security and Workloads units |
+| `novapay-region-deny` (`p-pyxqnvs4`) | `DenyOutsideEuWest1`, global services excluded by `NotAction` | Security and Workloads units |
+| `novapay-workloads-guardrails` (`p-wgirycnf`) | superseded by the three above; destroyed by the detection-move runbook | Workloads unit, still |
 
-The Security unit carries only `FullAWSAccess`. So the account this design
-nominates to hold detection is the one account with no guardrail on it, and the
-region deny does not exist anywhere.
+Until 2026-09-11 the Security unit carried only `FullAWSAccess`, so the account
+this design nominates to hold detection was the one account with no guardrail on
+it, and the region deny existed nowhere. Both are now fixed, and the region deny
+is the one row here tested rather than merely attached: from inside both member
+accounts, `ec2:DescribeVpcs` in `eu-central-1` is refused with an explicit deny
+naming `p-pyxqnvs4`, while `iam:ListAccountAliases` still succeeds. See
+`evidence/2026-09-11-scps-and-account-baseline.txt`, which also records why the
+trail and detection denies were deliberately not tamper-tested.
 
-Note what the narrowing bullet above argues, and then what the policy denies.
-The bullet is right that an updated trail is the dangerous case. The policy
-covers `StopLogging` and `DeleteTrail` and says nothing about `UpdateTrail`.
-That gap sat behind a `live` marker in `THREAT_MODEL.md` for weeks, because the
-document was checked against the Terraform rather than against the account.
+Note what the narrowing bullet above argues, and then what the old policy
+denied. The bullet is right that an updated trail is the dangerous case. The
+policy covered `StopLogging` and `DeleteTrail` and said nothing about
+`UpdateTrail`. That gap sat behind a `live` marker in `THREAT_MODEL.md` for
+weeks, because the document was checked against the Terraform rather than
+against the account. The replacement denies both, and this table is written from
+a read-back for the same reason.
 
 **The gap this design has.** None of it applies to the management account, which holds the organisation, the log bucket, the log key and the Terraform state. What protects that account is root MFA and its IAM configuration, and today it also contains administrator IAM users with long-lived keys that no scanner in this repository can see, because they were made in the console. Moving the log bucket and key into the Security account is the fix for half of it; the other half is operating through Identity Center rather than as an IAM user.
 
