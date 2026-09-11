@@ -487,6 +487,8 @@ Local checkov on Windows therefore under-reports, and the reproduction is to cop
 
 **Why no tool caught it:** Checkov and Conftest read the Terraform that was written, and the written policy is correct. It was never applied. No scanner in this repository reads an organisation, so the gap between written and applied is invisible to all of them by construction. This is the same class of failure as the CloudTrail encryption problem in August: a claim about a live system accepted without being tested against that system.
 
+**Status: the gap this entry describes is closed as of 2026-09-11** — the three policies are applied and the Security unit is governed; see the entry at the end of this file. The reasoning above is not superseded, only the state it describes. The structural point stands: no scanner here reads an organisation, so nothing but a read-back would have caught the gap then, and nothing but a read-back proves it closed now.
+
 **Consequence:** `capture-after-apply.sh` section headings were changed from assertions to questions. A heading that states the expected answer turns a capture into confirmation of its own assumption, which is precisely how "GuardDuty administered from the Security account" came to be printed above output naming the management account.
 
 ---
@@ -500,3 +502,19 @@ Local checkov on Windows therefore under-reports, and the reproduction is to cop
 **What this does not change:** the trail keeps log-file validation and multi-region logging; it now uses SSE-S3, which is what it was already actually using. The 2026-09-06 decision to keep the trail's own `prevent_destroy` (the "at a euro a month" entry) still holds — that reasoning was always about the trail and bucket, not about a key that turned out to be inert.
 
 **Evidence:** `terraform apply` output (3 changed: key policy tag/statement fix, bucket tags, bucket encryption config); `aws s3api head-object` on a live log object confirmed `ServerSideEncryption: AES256` with no `SSEKMSKeyId`; `aws kms describe-key` after the destroy confirmed `KeyState: PendingDeletion`, `DeletionDate: 2026-09-18`.
+
+---
+
+## 2026-09-11 — The guardrails are applied, and the new policies go on before the old one comes off
+
+**Decision:** Apply the three service control policies and the account baseline with two targeted `terraform apply` runs, leaving the superseded `novapay-workloads-guardrails` attached until the detection move destroys it.
+
+**Why targeted and not a bare apply:** a plain `terraform apply` in this repository is 24 to add, 18 to change, 2 to destroy, and it would recreate `aws_kms_key.app_data`, `aws_secretsmanager_secret.db_credentials` and now `aws_kms_key.cloudtrail_logs` — three resources whose Terraform is kept deliberately while their live instances are deliberately gone. Winding a resource down without deleting its code leaves a loaded gun in the repository: the wind-down is only as durable as the next person's habit of reading the plan. `docs/NEXT-STEPS.md` carries the exact `-target` lists and this warning at the point of use, which is the only place a warning works.
+
+**Why the old policy stays attached for now:** `docs/runbooks/move-detection-to-security-account.md` predicted "a gap of seconds between the old guardrail policy being detached and the new ones attaching, during which the Workloads unit is governed by no service control policy", and accepted that gap in writing. Applying the new policies first removes it. The unit is over-governed until step 3 instead of ungoverned for a few seconds, and over-governed is the direction to err in. The runbook still destroys both addresses; its note about the gap is now stale in our favour rather than wrong.
+
+**What was verified, and what was not:** every control was read back out of AWS rather than out of the code, per the 2026-09-06 entry above. The region deny was tested by assuming `OrganizationAccountAccessRole` into both member accounts and calling `ec2:DescribeVpcs` in `eu-central-1`; both refused with an explicit deny naming `p-pyxqnvs4`, while `iam:ListAccountAliases` still succeeded, which is the `NotAction` list working. The `cloudtrail`/`guardduty`/`securityhub`/`config` denies were **not** tamper-tested: the only honest test of a deny on `cloudtrail:StopLogging` is to call `StopLogging`, and if the policy were not in force that call would stop the organisation trail, which is currently the only detective control running. Attachment plus a shared mechanism is weaker evidence than the region row has, and it is recorded as weaker rather than rounded up.
+
+**Evidence:** `evidence/2026-09-11-scps-and-account-baseline.txt`.
+
+**Noted, not fixed:** the verification ran as `arn:aws:iam::771665904432:user/cli-admin`, a management-account IAM user with a long-lived access key — one of the credentials `docs/NEXT-STEPS.md` step 4 exists to delete. Whoever does that step must establish what replaces this access path before removing it.

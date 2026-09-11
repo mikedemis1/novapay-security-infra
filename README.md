@@ -23,14 +23,14 @@ Three kinds of row, because they are three different claims.
 | AWS Organizations, three accounts, two organisational units | live |
 | Organisation CloudTrail, multi-region, log-file validation | live |
 | CloudTrail encrypted with a customer-managed key | dropped 2026-09-11: the key never encrypted a log object, trail now honestly uses SSE-S3 |
-| Service control policy: workload guardrails on the Workloads unit | live |
-| Service control policies: base guardrails at the root, security-service protection and region deny on both units | written, never applied |
+| Service control policy: workload guardrails on the Workloads unit | live, and superseded: the three policies below replace it, and it is destroyed by step 3's runbook |
+| Service control policies: base guardrails at the root, security-service protection and region deny on both units | live 2026-09-11; the region deny tested from inside both member accounts, not just attached |
 | GuardDuty and Security Hub, enabled organisation-wide | wound down 2026-09-06 |
 | GuardDuty and Security Hub, administered from the Security account | written, never applied |
 | S3 protection and malware protection, enabled through organisation configuration | written, never applied |
 | IAM Identity Center with an administrator permission set | live |
 | HIGH and CRITICAL findings emailed through EventBridge and SNS | rule and topic still exist; nothing can fire them since detection was wound down |
-| Account baseline: public access block, password policy, Access Analyzer, EBS encryption, security contact | written, never applied |
+| Account baseline: public access block, password policy, Access Analyzer, EBS encryption, security contact | live 2026-09-11, read back per account |
 | VPC across two availability zones, three subnet tiers, chained security groups | live |
 | Customer-managed KMS key for the log bucket, rotating | wound down 2026-09-11 (scheduled for deletion, 7-day window to 2026-09-18); it existed but never actually encrypted a log object, see below |
 | Customer-managed KMS key for application data, rotating | wound down 2026-09-06 |
@@ -50,11 +50,29 @@ estate was wound down instead of hardened. That was a cost decision, taken
 deliberately and recorded rather than left to drift: see
 `docs/runbooks/wind-down-billable-resources.md`.
 
+Two of those rows stopped being written rows on 2026-09-11. The service control
+policies and the account baseline cost nothing to run, so the cost decision
+never applied to them — they were simply blocked behind the detection move, and
+they are not. Both went on with targeted applies rather than a bare
+`terraform apply`, which in this repository would also recreate three
+deliberately wound-down resources whose code is kept on purpose;
+`docs/NEXT-STEPS.md` carries the exact target lists and the reason. Read back
+per account in `evidence/2026-09-11-scps-and-account-baseline.txt`, including
+the region deny refusing `ec2:DescribeVpcs` in `eu-central-1` from inside both
+member accounts, with the denying policy id in the error. What is still written
+and never applied is the detection move itself and the IAM role that replaces
+the old test user's long-lived key.
+
 What is left running costs about 1.30 USD a month and is almost entirely free
-tier: the organisation and its accounts, the service control policy, Identity
-Center, the VPC, the state bucket, and the organisation CloudTrail with its
-key. The trail stayed on purpose. It carries `prevent_destroy`, and a control
-you have deliberately guarded is not one to switch off to save a euro.
+tier: the organisation and its accounts, the service control policies, the
+account baseline, Identity Center, the VPC, the state bucket, and the
+organisation CloudTrail. The trail stayed on purpose. It carries
+`prevent_destroy`, and a control you have deliberately guarded is not one to
+switch off to save a euro. Its customer-managed key did not stay, because it
+was never encrypting anything; that is the 2026-09-11 row above. Service
+control policies, password policies, the public access block, EBS encryption by
+default and an external-access Access Analyzer are all free, so the 2026-09-11
+applies did not move this figure.
 
 ## Architecture
 
@@ -109,7 +127,7 @@ The most useful part of this repository. Each of these was found by testing some
 
 **The repository could not be planned.** `terraform plan` failed on a clean checkout whenever the cluster was down, which is most of the time. Kubernetes manifests validate against the live cluster's schema during plan, and the provider is configured from an endpoint that does not exist yet. No amount of `depends_on` helps, because it fails before apply. The cluster is now a separate stack, which is what the two things were in practice all along.
 
-**A threat model that marked absent controls as live.** The B2 table claimed five enforced guardrails. Read back from the organisation rather than from the code, one was accurate, two covered a narrower scope than claimed, and two described policy that had never been applied at all, including the region deny. The Security account turned out to carry no service control policy whatsoever. Worst of the five: `ARCHITECTURE.md` argues that narrowing a trail is the failure that matters, because an updated trail still looks healthy, and the policy answering it denies `StopLogging` and `DeleteTrail` while saying nothing about `UpdateTrail`. Nothing in the pipeline could have caught this. Checkov and Conftest read the Terraform that was written, and the written policy was correct; it was never applied, and no scanner in this repository reads an organisation.
+**A threat model that marked absent controls as live.** The B2 table claimed five enforced guardrails. Read back from the organisation rather than from the code, one was accurate, two covered a narrower scope than claimed, and two described policy that had never been applied at all, including the region deny. The Security account turned out to carry no service control policy whatsoever. Worst of the five: `ARCHITECTURE.md` argues that narrowing a trail is the failure that matters, because an updated trail still looks healthy, and the policy answering it denies `StopLogging` and `DeleteTrail` while saying nothing about `UpdateTrail`. Nothing in the pipeline could have caught this. Checkov and Conftest read the Terraform that was written, and the written policy was correct; it was never applied, and no scanner in this repository reads an organisation. Closed 2026-09-11: the three policies are applied, the Security unit now carries two, and the `UpdateTrail` hole is closed by `protect_security_services`, which denies it alongside `StopLogging`, `DeleteTrail` and `PutEventSelectors`. The lesson that produced this entry is why the evidence file for that apply reads every control back out of AWS, and tests the region deny from inside the member accounts instead of trusting that an attached policy denies anything.
 
 **A cluster version that was already out of support.** The first guess, 1.30, was past both standard and extended support on the day it was chosen. `aws eks describe-cluster-versions` is the answer; memory is not.
 
