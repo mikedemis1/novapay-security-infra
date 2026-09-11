@@ -81,7 +81,7 @@ document was checked against the Terraform rather than against the account.
 
 ## Evidence and detection
 
-The organisation trail records every account into one bucket, with log-file validation so tampering is detectable and a customer-managed key so reading the bucket is not the same as reading the logs.
+The organisation trail records every account into one bucket, with log-file validation so tampering is detectable. It uses SSE-S3, not a customer-managed key: a CMK was tried and never actually took effect (see "What broke" in README.md), and was dropped 2026-09-11 rather than fixed, since it had never once encrypted a log object. Reading the bucket is therefore the same as reading the logs — a known, accepted gap, not the design target.
 
 GuardDuty and Security Hub belong in the Security account. That placement is not cosmetic: findings aggregate in the administrator's account, and an EventBridge rule only matches events on its own account's bus. An alert rule left behind in the management account after moving the administrator keeps existing, keeps looking healthy, and never fires again.
 
@@ -131,4 +131,4 @@ Kept current on purpose, because a design document that quietly diverges from th
 - The database tier, the load balancer and the real transaction service do not exist.
 - Detection does not exist either. GuardDuty and Security Hub were wound down on 2026-09-06, so the diagram's path from the trail to an email stops at the trail.
 - Secrets Manager holds nothing; the secret was destroyed in the same wind-down, and it was never re-encrypted with a customer-managed key as this document assumes.
-- The organisation trail, its bucket and its key are the detection story that is still true. They stayed because they carry `prevent_destroy` and cost about a euro a month.
+- The organisation trail and its bucket are the detection story that is still true. They stayed because they carry `prevent_destroy` and cost about a euro a month. The bucket's customer-managed key did not: it was dropped 2026-09-11, since it had never once encrypted a log object (see "Evidence and detection" above).

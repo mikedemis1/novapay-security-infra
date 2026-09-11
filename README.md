@@ -22,7 +22,7 @@ Three kinds of row, because they are three different claims.
 |---|---|
 | AWS Organizations, three accounts, two organisational units | live |
 | Organisation CloudTrail, multi-region, log-file validation | live |
-| CloudTrail encrypted with a customer-managed key | written, never applied |
+| CloudTrail encrypted with a customer-managed key | dropped 2026-09-11: the key never encrypted a log object, trail now honestly uses SSE-S3 |
 | Service control policy: workload guardrails on the Workloads unit | live |
 | Service control policies: base guardrails at the root, security-service protection and region deny on both units | written, never applied |
 | GuardDuty and Security Hub, enabled organisation-wide | wound down 2026-09-06 |
@@ -32,7 +32,7 @@ Three kinds of row, because they are three different claims.
 | HIGH and CRITICAL findings emailed through EventBridge and SNS | rule and topic still exist; nothing can fire them since detection was wound down |
 | Account baseline: public access block, password policy, Access Analyzer, EBS encryption, security contact | written, never applied |
 | VPC across two availability zones, three subnet tiers, chained security groups | live |
-| Customer-managed KMS key for the log bucket, rotating | live |
+| Customer-managed KMS key for the log bucket, rotating | wound down 2026-09-11 (scheduled for deletion, 7-day window to 2026-09-18); it existed but never actually encrypted a log object, see below |
 | Customer-managed KMS key for application data, rotating | wound down 2026-09-06 |
 | Secrets Manager secret | wound down 2026-09-06, and never re-encrypted with the customer-managed key |
 | Terraform state in S3, versioned, locked, public access blocked | live |
@@ -64,8 +64,8 @@ Three accounts, because the account is AWS's only hard security boundary. The ma
 flowchart TB
     subgraph MGMT["Management account"]
         ORG["Organizations, service control policies"]
-        TRAIL["Organisation CloudTrail<br/>multi-region, validated, CMK"]
-        BUCKET["Log bucket + CMK"]
+        TRAIL["Organisation CloudTrail<br/>multi-region, validated, SSE-S3"]
+        BUCKET["Log bucket"]
         STATE["Terraform state"]
     end
 
@@ -101,7 +101,7 @@ The most useful part of this repository. Each of these was found by testing some
 
 **Network policies were silently doing nothing.** The default-deny and DNS-only egress policies existed in the cluster and were accepted by the API. An HTTPS request from a pod that should have been blocked succeeded. The VPC CNI does not enforce NetworkPolicy objects unless `enableNetworkPolicy` is set on the add-on. Everything else tested that day worked from the start; this one looked identical to working.
 
-**A fix that was recorded as done and never took effect.** The decision log said the trail had been moved from SSE-S3 to a customer-managed key in August. Only the bucket default had changed. CloudTrail sets the encryption on its own PutObject call, and the per-object choice beats the bucket default, so every log written for the next month was still SSE-S3. One `head-object` would have caught it at the time. The baseline capture in `evidence/` is that check, run a month late.
+**A fix that was recorded as done and never took effect.** The decision log said the trail had been moved from SSE-S3 to a customer-managed key in August. Only the bucket default had changed. CloudTrail sets the encryption on its own PutObject call, and the per-object choice beats the bucket default, so every log written for the next month was still SSE-S3. One `head-object` would have caught it at the time. The baseline capture in `evidence/` is that check, run a month late. Resolved 2026-09-11 by a five-agent review: rather than chase the `UpdateKeyDescription`/`PutKeyPolicy` apply-order bug below to make the CMK actually take effect, the key was scheduled for deletion instead, since it was costing roughly 1-2 USD a month for a control that had never once run. The trail keeps SSE-S3, which is what it was always actually doing.
 
 **Deleting the branches did not delete the leaked commits.** Two branches containing real account root emails were squash-merged and deleted before the repository was made public, and that was recorded as closing the exposure. GitHub keeps unreachable commits fetchable by SHA, and publishes those SHAs through its own events API. The commits were still being served. The reasoning failed because a claim about an external system was accepted without testing it against that system.
 

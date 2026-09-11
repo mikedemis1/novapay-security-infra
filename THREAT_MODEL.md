@@ -92,7 +92,7 @@ argument for periodic verification against a source that is not the code.
 | STRIDE | Threat | Control | Status |
 |---|---|---|---|
 | Tampering | Log objects altered after the fact | log-file validation, S3 versioning | live |
-| Information disclosure | Logs readable by anyone who can read the bucket | customer-managed key set as the bucket default | **gap: the key exists and the objects do not use it** |
+| Information disclosure | Logs readable by anyone who can read the bucket | SSE-S3 (no customer-managed key) | **accepted 2026-09-11: a CMK was tried, never actually encrypted a log object (per-object PutObject encryption always beat the bucket default), and was dropped rather than fixed since it was pure unused cost. Bucket-read now genuinely equals log-read, with no scoped-decrypt control on top of it — this is the honest residual risk, not the earlier false claim of one** |
 | Tampering | Log objects deleted | versioning only | **gap: no deny statement, no object lock** |
 | Denial of service | Detection findings never reach a person | EventBridge to SNS | the rule and topic still exist, but detection was wound down on 2026-09-06, so nothing can generate a finding to deliver |
 
