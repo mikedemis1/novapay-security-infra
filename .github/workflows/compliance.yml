@@ -133,12 +133,18 @@ jobs:
       # tested. This fixture violates every rule on purpose.
       #
       # Counting matters. Asserting only that conftest exits non-zero passes as
-      # long as any single rule fires, so thirteen rules could quietly stop
-      # working and the step would stay green. The count is the assertion; when
-      # a rule or a fixture case is added, this number moves with it.
+      # long as any single rule fires, so a rule could quietly stop working and
+      # the step would stay green. The count is the assertion; when a rule or a
+      # fixture case is added, this number moves with it.
+      #
+      # 14 -> 13 on 2026-09-11: cloudtrail_integrity.rego's "kms_key_id must be
+      # set" rule was removed (the trail's CMK was dropped, see
+      # SECURITY_DECISIONS.md), so aws_cloudtrail.bad in the fixture now trips
+      # one fewer rule. Verified locally with conftest 0.56.0 (this step's
+      # pinned version) before changing this number.
       - name: policy self-test
         env:
-          EXPECTED_FAILURES: 14
+          EXPECTED_FAILURES: 13
         run: |
           actual=$(conftest test --parser hcl2 --policy policy --all-namespaces             --output json policy/fixtures/violations.tf.fixture             | jq '[.[].failures[]] | length')
           if [ "$actual" -ne "$EXPECTED_FAILURES" ]; then

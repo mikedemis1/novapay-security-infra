@@ -252,6 +252,8 @@ Running log of architecture/security decisions and why they were made. Written i
 
 ## 2026-09-06 — The organisation trail was never encrypted with the CMK
 
+**Status: superseded 2026-09-11.** The decision below (set `kms_key_id`, add `kms:Decrypt`) was never actually applied before this entry was superseded — see the 2026-09-11 entry below, which drops the CMK instead of fixing the apply-order bug that kept blocking it.
+
 **What was believed:** the 2026-08-08 gap analysis recorded that the trail had moved from SSE-S3 to `novapay-cloudtrail-key`. Two documents repeated it.
 
 **What was true:** only the bucket default encryption changed. CloudTrail sets the algorithm on its own `PutObject` call, and a per-object choice beats a bucket default, so every log object written between then and now is SSE-S3. `get-trail` returns no `KmsKeyId`; `head-object` on a live log object returns `AES256`. Both captured in `evidence/2026-09-06-landing-zone-baseline.txt`.
@@ -457,6 +459,8 @@ Local checkov on Windows therefore under-reports, and the reproduction is to cop
 
 ## 2026-09-06 — The organisation CloudTrail stays, at a euro a month
 
+**Status: partially superseded 2026-09-11**, for the key only. The trail and its bucket are untouched and still carry `prevent_destroy`, exactly as decided below. The key's `prevent_destroy` was removed and the key scheduled for deletion: a five-agent review found it had never encrypted a single log object (see the 2026-09-06 entry above and `README.md`), so the "cost of keeping an audit trail" reasoning here never actually applied to the key, only to the trail and bucket, which is why they stay.
+
 **Decision:** Do not remove `prevent_destroy` from the trail, its bucket or its key. Leave all three running.
 
 **Why:** Step 4 of the wind-down stopped on `Instance cannot be destroyed`. The guard was added in PR #1 and it did exactly what such a guard is for: it turned a step in a script into a decision. Keeping the trail costs about 1.20 USD a month more than removing it. An organisation trail with log-file validation is the one control nobody switches off, and overriding a guard put there deliberately, to save a euro, would have been the wrong answer to a question I had already answered when I wrote the guard.
@@ -484,3 +488,15 @@ Local checkov on Windows therefore under-reports, and the reproduction is to cop
 **Why no tool caught it:** Checkov and Conftest read the Terraform that was written, and the written policy is correct. It was never applied. No scanner in this repository reads an organisation, so the gap between written and applied is invisible to all of them by construction. This is the same class of failure as the CloudTrail encryption problem in August: a claim about a live system accepted without being tested against that system.
 
 **Consequence:** `capture-after-apply.sh` section headings were changed from assertions to questions. A heading that states the expected answer turns a capture into confirmation of its own assumption, which is precisely how "GuardDuty administered from the Security account" came to be printed above output naming the management account.
+
+---
+
+## 2026-09-11 — The CloudTrail CMK is dropped instead of fixed
+
+**Decision:** Five-agent review (factual, senior engineer, hiring manager, cost advocate, consistency reviewer; 4 of 5 for this outcome). Remove `kms_key_id` from `aws_cloudtrail.org_trail`, set the bucket default back to `AES256`, remove `prevent_destroy` from `aws_kms_key.cloudtrail_logs`, and schedule the key for deletion (7-day window, to 2026-09-18). The trail itself, its bucket, and their `prevent_destroy` are untouched.
+
+**Why:** the two entries above (2026-09-06) both assumed the CMK would eventually be wired in correctly and budgeted its ~1-2 USD/month as the cost of that. It never worked: `evidence/2026-09-06-landing-zone-baseline.txt` already showed no `KmsKeyId` on the trail and `AES256` on live log objects before this session started, and a fresh `head-object` taken after this apply confirms the trail was never touched by the apply at all (its `kms_key_id` was already unset in state) — only the bucket default and the key's own policy changed. Continuing to carry a key that has never once encrypted a log object, on the promise of a future fix to the `UpdateKeyDescription`/`PutKeyPolicy` apply-order bug (see `## 2026-07-17 — KMS key policy` and "What broke" in `README.md`), was pure cost for a control that does not run.
+
+**What this does not change:** the trail keeps log-file validation and multi-region logging; it now uses SSE-S3, which is what it was already actually using. The 2026-09-06 decision to keep the trail's own `prevent_destroy` (the "at a euro a month" entry) still holds — that reasoning was always about the trail and bucket, not about a key that turned out to be inert.
+
+**Evidence:** `terraform apply` output (3 changed: key policy tag/statement fix, bucket tags, bucket encryption config); `aws s3api head-object` on a live log object confirmed `ServerSideEncryption: AES256` with no `SSEKMSKeyId`; `aws kms describe-key` after the destroy confirmed `KeyState: PendingDeletion`, `DeletionDate: 2026-09-18`.

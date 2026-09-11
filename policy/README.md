@@ -7,7 +7,7 @@ Seven Rego rules, run by Conftest on every pull request. They read Terraform sou
 | Rule | Checks | DORA article |
 |---|---|---|
 | `kms_key_rotation` | every customer-managed key rotates | Art. 9(4)(d), protection of cryptographic keys |
-| `cloudtrail_integrity` | trails have log-file validation and a customer-managed key | Art. 9(4)(d) and Art. 10(1), detection depends on a trustworthy record |
+| `cloudtrail_integrity` | trails have log-file validation; if a key is set, it isn't an AWS-managed alias dressed up as a CMK | Art. 9(4)(d) and Art. 10(1), detection depends on a trustworthy record |
 | `s3_public_access` | every bucket has a matching public access block | Art. 9(3)(b), minimise the risk of unauthorised access |
 | `network_exposure` | no ingress from `0.0.0.0/0` except port 443 | Art. 9(4)(c), least-privilege logical access |
 | `secrets_encryption` | secrets use a customer-managed key, not the AWS-managed one | Art. 9(2), protection of data at rest |
@@ -41,7 +41,7 @@ conftest test --parser hcl2 --policy policy --all-namespaces $(find infra -name 
 conftest test --parser hcl2 --policy policy --all-namespaces policy/fixtures/violations.tf.fixture
 ```
 
-The first must pass. The second must fail with fourteen findings, one per row below.
+The first must pass. The second must fail with thirteen findings, one per row below. (Was fourteen before 2026-09-11, when `cloudtrail_integrity`'s "kms_key_id must be set" rule was dropped — see `.github/workflows/compliance.yml`'s policy self-test step.)
 
 ### Running checkov the way CI runs it, on Windows
 
