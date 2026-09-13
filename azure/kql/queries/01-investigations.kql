@@ -1,0 +1,57 @@
+// Select and execute one block at a time, from its let statements through its
+// final operator. Each block repeats its own time bounds so it runs on its own.
+
+// Q1: Which login attempts failed in the fixed ten-minute window?
+let Start = datetime(2026-09-13T10:00:00Z);
+let End = datetime(2026-09-13T10:10:00Z);
+SecurityEventsV1
+| where EventTime >= Start and EventTime < End
+| where EventName == "ConsoleLogin" and Outcome == "Failure"
+| project EventId, EventTime, Actor, SourceIp
+| order by EventId asc
+
+// Q2: Which actor/IP pairs have at least five failures in a five-minute bin?
+let Start = datetime(2026-09-13T10:00:00Z);
+let End = datetime(2026-09-13T10:10:00Z);
+SecurityEventsV1
+| where EventTime >= Start and EventTime < End
+| where EventName == "ConsoleLogin" and Outcome == "Failure"
+| summarize Failures=count() by Actor, SourceIp, WindowStart=bin(EventTime, 5m)
+| where Failures >= 5
+| order by Actor asc
+
+// Q3: Which successes follow at least two failures for the same actor/IP?
+let Start = datetime(2026-09-13T10:00:00Z);
+let End = datetime(2026-09-13T10:10:00Z);
+let Logins = SecurityEventsV1
+    | where EventTime >= Start and EventTime < End
+    | where EventName == "ConsoleLogin";
+let Failures = Logins
+    | where Outcome == "Failure"
+    | summarize FailureCount=count(), LastFailure=max(EventTime) by Actor, SourceIp
+    | where FailureCount >= 2;
+Logins
+| where Outcome == "Success"
+| project SuccessId=EventId, Actor, SourceIp, SuccessTime=EventTime
+| join kind=inner (Failures) on Actor, SourceIp
+| where SuccessTime > LastFailure and SuccessTime <= LastFailure + 5m
+| project Actor, SourceIp, FailureCount, LastFailure, SuccessTime, SuccessId
+| order by Actor asc
+
+// Q4: Which successful logins explicitly record no MFA?
+let Start = datetime(2026-09-13T10:00:00Z);
+let End = datetime(2026-09-13T10:10:00Z);
+SecurityEventsV1
+| where EventTime >= Start and EventTime < End
+| where EventName == "ConsoleLogin" and Outcome == "Success" and MfaUsed == false
+| project EventId, Actor, SourceIp, EventTime
+| order by EventId asc
+
+// Q5: Which selected identity changes succeeded, excluding denied attempts?
+let Start = datetime(2026-09-13T10:00:00Z);
+let End = datetime(2026-09-13T10:10:00Z);
+SecurityEventsV1
+| where EventTime >= Start and EventTime < End
+| where EventName in ("CreateAccessKey", "AttachUserPolicy") and Outcome == "Success"
+| project EventId, Actor, EventName, EventTime
+| order by EventId asc
