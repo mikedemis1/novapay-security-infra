@@ -205,10 +205,16 @@ week fixing. That runbook runs entirely from `main`.
 Read back from the live account on 2026-09-13, so these are facts rather than
 recollections.
 
-- [ ] Root MFA on all three accounts (one is currently missing). Console only —
-      there is no API for root MFA. Management `771665904432`, security
-      `547090165470`, workloads `277606037083`; the two members need a root
-      password reset first.
+- [x] Root MFA on all three accounts. **Done 2026-09-13**, read back with
+      `get-account-summary`: management, security and workloads all report
+      `AccountMFAEnabled = 1`. Devices are `Authapp` and
+      `novapay-management-root` on management, `novapay-security-root`,
+      `novapay-workloads-root`. Evidence:
+      `evidence/2026-09-13-root-mfa.txt`.
+
+      Console only — there is no API for root MFA, which is also why it is the
+      one control here that cannot be expressed in Terraform. Worth saying out
+      loud rather than leaving as a silent gap in the code.
 - [ ] Delete the two console-created IAM users with long-lived access keys in
       the management account.
 
