@@ -207,3 +207,121 @@ resource "aws_organizations_policy_attachment" "region_deny_security" {
 # advice, but Workloads still has no root MFA, and enabling that is a root
 # console action. Denying root before the account can be secured would remove
 # the only way to secure it. Root MFA first, then this policy.
+
+# The cost guardrail, added 2026-09-13.
+#
+# AWS has no hard spending cap. Budgets notify and nothing more, and Budget
+# Actions — which can apply a policy automatically — run off billing data that
+# lags by hours, so they are a net rather than a brake. The only control that
+# refuses the spend at the moment it is requested is a service control policy,
+# which is free, instant and needs no billing data at all.
+#
+# This exists because the estate is deliberately near-zero-cost and the risk is
+# not malice, it is a hurried `terraform apply` or a copied console tutorial.
+# The 2026-09-13 cost audit found the account clean, so the job here is to keep
+# it that way rather than to claw anything back.
+#
+# Default-deny, lifted on purpose. The plan runs on test days: detach this
+# policy or add a narrow exception, do the work, capture the evidence, put it
+# back. A guardrail that is inconvenient once a month is working; one that is
+# never in the way is not protecting anything.
+#
+# Deliberately NOT denied, because the plan needs them: GuardDuty and Security
+# Hub (both free for 30 days per account and scheduled for October), Lambda,
+# EventBridge, SNS, S3, IAM and CloudWatch. Denying those would block the
+# detection work this repository exists to demonstrate.
+#
+# A useful side effect: kms:CreateKey and secretsmanager:CreateSecret are on the
+# list, and the Terraform for the wound-down app-data key and database secret is
+# still in this repository on purpose. So this policy is also a second line of
+# defence against the exact accident docs/NEXT-STEPS.md warns about — a bare
+# `terraform apply` silently recreating what was destroyed to save money.
+resource "aws_organizations_policy" "cost_guardrails" {
+  name        = "novapay-cost-guardrails"
+  description = "Refuse the services that cost real money in a lab that is meant to cost nothing"
+  type        = "SERVICE_CONTROL_POLICY"
+
+  content = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "DenyBillableCompute"
+        Effect = "Deny"
+        Action = [
+          "ec2:RunInstances",
+          "ec2:StartInstances",
+          "eks:CreateCluster",
+          "eks:CreateNodegroup",
+          "ecs:CreateCluster",
+          "lightsail:Create*",
+          "elasticbeanstalk:CreateEnvironment",
+          "emr:RunJobFlow",
+          "sagemaker:CreateNotebookInstance",
+          "sagemaker:CreateEndpoint",
+        ]
+        Resource = "*"
+      },
+      {
+        # The quiet ones. A NAT gateway is about 32 USD a month, an interface
+        # endpoint about 7, and an unattached Elastic IP about 3.60 — none of
+        # them look like they are running, and all of them bill by the hour.
+        Sid    = "DenyBillableNetworking"
+        Effect = "Deny"
+        Action = [
+          "ec2:CreateNatGateway",
+          "ec2:AllocateAddress",
+          "ec2:CreateVpcEndpoint",
+          "ec2:CreateTransitGateway",
+          "ec2:CreateClientVpnEndpoint",
+          "elasticloadbalancing:CreateLoadBalancer",
+          "globalaccelerator:CreateAccelerator",
+          "directconnect:CreateConnection",
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "DenyBillableData"
+        Effect = "Deny"
+        Action = [
+          "rds:CreateDBInstance",
+          "rds:CreateDBCluster",
+          "elasticache:CreateCacheCluster",
+          "elasticache:CreateReplicationGroup",
+          "memorydb:CreateCluster",
+          "redshift:CreateCluster",
+          "fsx:CreateFileSystem",
+          "efs:CreateFileSystem",
+        ]
+        Resource = "*"
+      },
+      {
+        # Small, recurring and easy to forget: a customer-managed KMS key is
+        # 1 USD a month, a secret 0.40, a hosted zone 0.50. This repository has
+        # already deleted two keys and wound down a secret for exactly this
+        # reason. AWS Config is here because it has no useful free tier for
+        # rule evaluations and the plan replaced it with EventBridge and Lambda.
+        Sid    = "DenySmallRecurringCharges"
+        Effect = "Deny"
+        Action = [
+          "kms:CreateKey",
+          "secretsmanager:CreateSecret",
+          "route53:CreateHostedZone",
+          "config:PutConfigurationRecorder",
+          "config:PutConfigRule",
+          "config:PutOrganizationConfigRule",
+        ]
+        Resource = "*"
+      },
+    ]
+  })
+}
+
+resource "aws_organizations_policy_attachment" "cost_guardrails_workloads" {
+  policy_id = aws_organizations_policy.cost_guardrails.id
+  target_id = aws_organizations_organizational_unit.workloads.id
+}
+
+resource "aws_organizations_policy_attachment" "cost_guardrails_security" {
+  policy_id = aws_organizations_policy.cost_guardrails.id
+  target_id = aws_organizations_organizational_unit.security.id
+}
