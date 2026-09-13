@@ -247,6 +247,7 @@ infra/workload/     cluster stack: EKS, workload, admission policies, web ACL
 policy/             Conftest rules, DORA mapping, and the fixture that proves they fire
 docs/runbooks/      procedures that cannot be a single terraform apply
 evidence/           terminal captures kept as proof a control behaved as described
+azure/kql/          introductory KQL lab on synthetic logs, executed in ADX free
 SECURITY_DECISIONS.md   every decision, with what was rejected and why
 THREAT_MODEL.md     assets, attackers, paths, mapped to STRIDE and OWASP
 ```

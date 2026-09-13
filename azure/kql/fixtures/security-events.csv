@@ -1,0 +1,15 @@
+EventId,EventTime,Actor,SourceIp,EventName,Outcome,MfaUsed
+E01,2026-09-13T10:00:00Z,alice,192.0.2.10,ConsoleLogin,Failure,false
+E02,2026-09-13T10:01:00Z,alice,192.0.2.10,ConsoleLogin,Failure,false
+E03,2026-09-13T10:02:00Z,alice,192.0.2.10,ConsoleLogin,Failure,false
+E04,2026-09-13T10:03:00Z,alice,192.0.2.10,ConsoleLogin,Failure,false
+E05,2026-09-13T10:04:00Z,alice,192.0.2.10,ConsoleLogin,Failure,false
+E06,2026-09-13T10:05:00Z,alice,192.0.2.10,ConsoleLogin,Success,true
+E07,2026-09-13T10:00:00Z,bob,192.0.2.20,ConsoleLogin,Failure,false
+E08,2026-09-13T10:02:00Z,bob,192.0.2.20,ConsoleLogin,Failure,false
+E09,2026-09-13T10:03:00Z,bob,192.0.2.20,ConsoleLogin,Success,true
+E10,2026-09-13T10:06:00Z,carol,192.0.2.30,ConsoleLogin,Failure,false
+E11,2026-09-13T09:59:00Z,dave,192.0.2.40,ConsoleLogin,Failure,false
+E12,2026-09-13T10:06:00Z,erin,192.0.2.50,ConsoleLogin,Success,false
+E13,2026-09-13T10:07:00Z,admin-lab,192.0.2.60,CreateAccessKey,Denied,true
+E14,2026-09-13T10:08:00Z,admin-lab,192.0.2.60,AttachUserPolicy,Success,true
