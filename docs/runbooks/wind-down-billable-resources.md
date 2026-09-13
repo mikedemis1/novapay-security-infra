@@ -7,7 +7,7 @@ Terraform alone, and two steps have a seven-day tail.
 
 ## Why this is not `terraform destroy`
 
-The obvious command is wrong here, for a reason worth stating rather than
+The obvious command is wrong here, for a reason worth stating instead of
 discovering.
 
 Most of what runs in this landing zone costs nothing. Organizations,
@@ -19,7 +19,7 @@ of it.
 
 Worse, `aws_organizations_account` on destroy does not close an account. It
 removes it from the organisation, which requires that account to carry its own
-payment method and support agreement, and leaves it standalone rather than
+payment method and support agreement, and leaves it standalone instead of
 gone. The member account email addresses are then spent, because AWS will not
 let the same address open another account. An untargeted destroy trades the most
 substantial thing this repository demonstrates for no saving at all, and does it
@@ -35,7 +35,7 @@ terraform state list
 ```
 
 Every address named below must appear. One that does not means state is not
-what this runbook assumes; stop and read it rather than guessing.
+what this runbook assumes; stop and read it, do not guess.
 
 `terraform init` is not needed if the backend is already configured locally,
 which `state list` returning anything proves. In PowerShell, quote the argument
@@ -120,7 +120,7 @@ That refusal is correct. A `moved` block is a promise about identity, and a plan
 that honoured it for some instances and not others would produce a state that
 matches neither. So both sides of both renames join this step. Both resources
 are being destroyed anyway, GuardDuty and Security Hub being the usage-billed
-half of detection, so nothing is lost by taking them here rather than in step 4.
+half of detection, so nothing is lost by taking them here instead of in step 4.
 
 ```
 terraform destroy \
@@ -213,7 +213,7 @@ If the GuardDuty detector features are still in state after step 1, add
 `-target=aws_guardduty_detector_feature.s3_data_events` and
 `-target=aws_guardduty_detector_feature.ebs_malware_protection` here. Step 1
 usually takes them as dependencies of the detector, so check
-`terraform state list` rather than assuming either way.
+`terraform state list`, do not assume either way.
 
 From here nothing watches the accounts. That is the intent, but note the date:
 "no findings" after this point is not the same claim as "no findings" before it.
@@ -221,7 +221,7 @@ From here nothing watches the accounts. That is the intent, but note the date:
 ## What actually happened, 2026-09-06
 
 Two things went wrong in ways the plan did not predict, and both are ordering
-problems rather than mistakes in the target lists.
+problems, not mistakes in the target lists.
 
 **Delegated administrators must be dismantled before the services they
 administer.** Step 1 destroyed the web ACL and the IAM policies, then failed:
@@ -234,7 +234,7 @@ InvalidInputException: Cannot disable Security Hub on the Security Hub administr
 
 The fix is to destroy `aws_guardduty_organization_admin_account.main` and
 `aws_securityhub_organization_admin_account.main` first. A destroy plan pulls in
-dependents rather than dependencies, so targeting the two administrator
+dependents and not dependencies, so targeting the two administrator
 registrations also picks up the two organisation configurations, which is what
 you want. Afterwards the detector and the hub each deleted in under a second,
 having previously spent five minutes failing.

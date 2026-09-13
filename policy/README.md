@@ -41,7 +41,7 @@ conftest test --parser hcl2 --policy policy --all-namespaces $(find infra -name 
 conftest test --parser hcl2 --policy policy --all-namespaces policy/fixtures/violations.tf.fixture
 ```
 
-The first must pass. The second must fail with thirteen findings, one per row below. (Was fourteen before 2026-09-11, when `cloudtrail_integrity`'s "kms_key_id must be set" rule was dropped — see `.github/workflows/compliance.yml`'s policy self-test step.)
+The first must pass. The second must fail with thirteen findings, one per row below. (Was fourteen before 2026-09-11, when `cloudtrail_integrity`'s "kms_key_id must be set" rule was dropped. See `.github/workflows/compliance.yml`'s policy self-test step.)
 
 ### Running checkov the way CI runs it, on Windows
 

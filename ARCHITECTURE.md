@@ -12,11 +12,11 @@ The AWS account is the only hard isolation boundary the platform offers. Everyth
 
 The rejected alternative was a single account with tags and IAM boundaries. It is cheaper and simpler, and it fails the only question that matters: an attacker who escalates inside it has everything, including the logs that would have shown what they did.
 
-The AWS reference architecture goes further and splits Security into a Log Archive account and a Security Tooling account, so that the account holding the evidence is not the account running the tools. That split is not implemented here. It is a deliberate simplification at this scale, recorded rather than skipped.
+The AWS reference architecture goes further and splits Security into a Log Archive account and a Security Tooling account, so that the account holding the evidence is not the account running the tools. That split is not implemented here. It is a deliberate simplification at this scale, recorded and not skipped.
 
 ## A transaction, and where it could go wrong
 
-There is no real transaction service yet, so this is the intended path rather than a live one. It is drawn because the control choices only make sense against it. Since the 2026-09-06 wind-down it is further from reality still: the web ACL, Secrets Manager and both detection services in this diagram no longer exist. What remains of it in AWS is the organisation trail.
+There is no real transaction service yet, so this describes the intended path, not what runs today. It is drawn because the control choices only make sense against it. Since the 2026-09-06 wind-down it is further from reality still: the web ACL, Secrets Manager and both detection services in this diagram no longer exist. What remains of it in AWS is the organisation trail.
 
 ```mermaid
 flowchart LR
@@ -44,7 +44,7 @@ Each hop is a place to lose control of the transaction, and each has one control
 | App outbound | Exfiltration after a compromise | default-deny egress, DNS to CoreDNS only |
 | Everything | Nobody notices | organisation trail, still running; GuardDuty, Security Hub and the alert email, all wound down 2026-09-06 |
 
-The database tier having no egress block at all is intentional and worth explaining, because it looks like an omission. Terraform's inline egress rules are authoritative: writing none removes the AWS default of allow-all-outbound rather than leaving it in place. A compromised database cannot open an outbound connection.
+The database tier having no egress block at all is intentional and worth explaining, because it looks like an omission. Terraform's inline egress rules are authoritative: writing none removes the AWS default of allow-all-outbound instead of leaving it in place. A compromised database cannot open an outbound connection.
 
 ## Guardrails
 
@@ -59,7 +59,7 @@ superseded `novapay-workloads-guardrails` was, on the Workloads unit alone:
 - **Region deny**, on both units: resources only in eu-west-1, with the global services excluded, because denying those by region locks an account out of IAM and Organizations with no way back in.
 
 **What is actually enforced**, read back from the organisation on 2026-09-11
-rather than from the code:
+instead of from the code:
 
 | Policy | Sids | Attached to |
 |---|---|---|
@@ -71,7 +71,7 @@ rather than from the code:
 Until 2026-09-11 the Security unit carried only `FullAWSAccess`, so the account
 this design nominates to hold detection was the one account with no guardrail on
 it, and the region deny existed nowhere. Both are now fixed, and the region deny
-is the one row here tested rather than merely attached: from inside both member
+is the one row here that was tested and not only attached. From inside both member
 accounts, `ec2:DescribeVpcs` in `eu-central-1` is refused with an explicit deny
 naming `p-pyxqnvs4`, while `iam:ListAccountAliases` still succeeds. See
 `evidence/2026-09-11-scps-and-account-baseline.txt`, which also records why the
@@ -81,19 +81,19 @@ Note what the narrowing bullet above argues, and then what the old policy
 denied. The bullet is right that an updated trail is the dangerous case. The
 policy covered `StopLogging` and `DeleteTrail` and said nothing about
 `UpdateTrail`. That gap sat behind a `live` marker in `THREAT_MODEL.md` for
-weeks, because the document was checked against the Terraform rather than
+weeks, because the document was checked against the Terraform and never
 against the account. The replacement denies both, and this table is written from
 a read-back for the same reason.
 
-**The gap this design has.** None of it applies to the management account, which holds the organisation, the log bucket, the log key and the Terraform state. What protects that account is root MFA and its IAM configuration, and today it also contains administrator IAM users with long-lived keys that no scanner in this repository can see, because they were made in the console. Moving the log bucket and key into the Security account is the fix for half of it; the other half is operating through Identity Center rather than as an IAM user.
+**The gap this design has.** None of it applies to the management account, which holds the organisation, the log bucket, the log key and the Terraform state. What protects that account is root MFA and its IAM configuration, and today it also contains administrator IAM users with long-lived keys that no scanner in this repository can see, because they were made in the console. Moving the log bucket and key into the Security account is the fix for half of it; the other half is operating through Identity Center instead of as an IAM user.
 
 ## Evidence and detection
 
-The organisation trail records every account into one bucket, with log-file validation so tampering is detectable. It uses SSE-S3, not a customer-managed key: a CMK was tried and never actually took effect (see "What broke" in README.md), and was dropped 2026-09-11 rather than fixed, since it had never once encrypted a log object. Reading the bucket is therefore the same as reading the logs — a known, accepted gap, not the design target.
+The organisation trail records every account into one bucket, with log-file validation so tampering is detectable. It uses SSE-S3, not a customer-managed key: a CMK was tried and never actually took effect (see "What broke" in README.md), and was dropped on 2026-09-11 instead of fixed, since it had never once encrypted a log object. Reading the bucket is therefore the same as reading the logs. That is a known, accepted gap and not the design target.
 
 GuardDuty and Security Hub belong in the Security account. That placement is not cosmetic: findings aggregate in the administrator's account, and an EventBridge rule only matches events on its own account's bus. An alert rule left behind in the management account after moving the administrator keeps existing, keeps looking healthy, and never fires again.
 
-**They were never actually put there.** An earlier version of this document stated the placement as fact. It was not: both services ran from the management account for their entire life, which is the gap `docs/runbooks/move-detection-to-security-account.md` exists to close and which was never executed. The claim survived here for weeks because nothing checked a design document against an account. `evidence/2026-09-06-pre-winddown.txt` is what checking looks like — the section headings assert the Security account and the output underneath returns the management account, on the same page.
+**They were never actually put there.** An earlier version of this document stated the placement as fact. It was not: both services ran from the management account for their entire life, which is the gap `docs/runbooks/move-detection-to-security-account.md` exists to close and which was never executed. The claim survived here for weeks because nothing checked a design document against an account. `evidence/2026-09-06-pre-winddown.txt` is what checking looks like: the section headings assert the Security account and the output underneath returns the management account, on the same page.
 
 **And as of 2026-09-06 neither service exists.** Both were wound down on cost grounds; `evidence/2026-09-06-post-winddown.txt` reads back no detectors, no administrator accounts, and an account not subscribed to Security Hub. So this section describes a design, not an estate. The organisation trail is the only part of it still running.
 
@@ -103,7 +103,7 @@ Continuous verification was already the weak point before that. Security Hub ran
 
 One VPC, `10.0.0.0/16`, six `/19` subnets across two availability zones in three tiers: public, private app, private database. Six subnets needed, so three bits borrowed, so `/19`, with two slots left over.
 
-Security groups reference each other rather than CIDR ranges: the load balancer group accepts 443 from anywhere, the app group accepts 8080 from the load balancer group, the database group accepts 5432 from the app group. The chain is then self-documenting and follows instances around automatically, instead of depending on address ranges someone has to remember to update.
+Security groups reference each other, not CIDR ranges: the load balancer group accepts 443 from anywhere, the app group accepts 8080 from the load balancer group, the database group accepts 5432 from the app group. The chain is then self-documenting and follows instances around automatically, instead of depending on address ranges someone has to remember to update.
 
 There is no NAT gateway in the platform stack. The private tiers have no route to the internet at all. When the cluster needs one, the workload stack creates it and removes it on teardown, because a NAT gateway left running for a month costs most of the budget.
 
@@ -115,11 +115,11 @@ Five layers, chosen so that no two do the same job:
 
 - **Pod Security Standards** at `restricted`, enforced by namespace label. Native to Kubernetes, nothing to install, and it rejects privileged and root containers before any admission controller runs.
 - **Kyverno** for the two things the standards do not cover: resource requests and limits must be set, and images must come from an approved registry. Deliberately not re-implementing what Pod Security Standards already enforces.
-- **Network policies**, default-deny in both directions, with DNS egress scoped to CoreDNS rather than port 53 anywhere. The narrow scoping matters: DNS to any destination is a working exfiltration channel that a default-deny policy will not catch, because it is, technically, DNS.
+- **Network policies**, default-deny in both directions, with DNS egress scoped to CoreDNS and not port 53 anywhere. The narrow scoping matters: DNS to any destination is a working exfiltration channel that a default-deny policy will not catch, because it is, technically, DNS.
 - **IRSA**, with the role's trust policy scoped on both the service account subject and the audience, so the role is usable by one service account in one cluster and nothing else.
 - **Image scanning** with Trivy.
 
-All five were tested by trying to violate them rather than by confirming they existed. One of the five was not working at all. See `evidence/2026-08-09-cluster-control-tests.md`.
+All five were tested by trying to violate them, not by confirming they existed. One of the five was not working at all. See `evidence/2026-08-09-cluster-control-tests.md`.
 
 ## Two stacks
 

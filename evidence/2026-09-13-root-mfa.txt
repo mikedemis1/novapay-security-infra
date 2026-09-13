@@ -1,0 +1,72 @@
+Root MFA, all three accounts
+2026-09-13. docs/NEXT-STEPS.md step 4.
+
+
+BEFORE
+------
+                              AccountMFAEnabled   devices
+management   771665904432             1           Authapp, novapay-management-root
+security     547090165470             1           novapay-security-root
+workloads    277606037083             0           none
+
+Only workloads missing. Created by Organizations so root had no password;
+needed a reset first.
+
+
+FIRST ATTEMPT WENT TO THE WRONG ACCOUNT
+---------------------------------------
+$ aws iam list-virtual-mfa-devices --assignment-status Assigned
+arn:aws:iam::771665904432:mfa/Authapp
+arn:aws:iam::771665904432:mfa/novapay-management-root
+arn:aws:iam::771665904432:mfa/novapay-workloads-root      <-- wrong account
+
+$ aws iam get-account-summary --query 'SummaryMap.AccountMFAEnabled'   # workloads
+0
+
+A device called novapay-workloads-root was sitting in management, and workloads
+was still at zero.
+
+Cause: the password reset was started from mikedemis01@gmail.com, which is
+management's root address, not mikedemis01+novapay-workloads@gmail.com. The
+sign-in after it landed in management. Both consoles look identical except for
+the account number top right.
+
+Caught it because the device was named after the account it was meant to
+protect, so the ARN and the name disagreed. Would not have caught it from the
+console, which did exactly what it was asked.
+
+Removed the stray device from management (still had 2 left, never dropped to
+zero), redid the reset with the right address in a private window, checked the
+account number before registering anything.
+
+
+AFTER
+-----
+$ aws iam get-account-summary --query 'SummaryMap.AccountMFAEnabled'
+$ aws iam list-virtual-mfa-devices --assignment-status Assigned
+
+management   771665904432   1   mfa/Authapp                 2026-05-12
+                                mfa/novapay-management-root 2026-08-09
+security     547090165470   1   mfa/novapay-security-root
+workloads    277606037083   1   mfa/novapay-workloads-root  2026-09-13T14:41:09Z
+
+management keeps 2 devices on purpose (AWS allows 8). Spare in case the phone
+dies.
+
+
+NOTES
+-----
+Root MFA has no API. Console only, as the root user. That is why this control
+is not in the Terraform and why the evidence here is a read-back.
+
+Each account has its own root password. Not shared.
+
+AWS says in the registration flow that root MFA becomes mandatory for
+Organizations-managed accounts in 35 days.
+
+Unassigned virtual MFA device 'mike' exists in management, attached to nothing.
+Left it alone.
+
+Still open: cli-admin has an active long-lived key and no MFA. Cannot remove it
+until Identity Center access works, since every CLI session here authenticates
+as cli-admin.

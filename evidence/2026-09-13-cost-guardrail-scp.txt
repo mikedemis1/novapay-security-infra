@@ -1,4 +1,4 @@
-Cost guardrail SCP — applied and negative-tested
+Cost guardrail SCP, applied and negative-tested
 Date: 2026-09-13
 Policy: novapay-cost-guardrails, p-s9ly2gd2
 Attached to: Workloads (ou-f915-pkfqytr1) and Security (ou-f915-bvzrbudp)
@@ -29,7 +29,7 @@ Compute      RunInstances, StartInstances, EKS cluster and nodegroup, ECS
 Networking   NAT gateway, Elastic IP allocation, VPC interface endpoint,
              Transit Gateway, Client VPN, load balancer, Global Accelerator,
              Direct Connect
-             — the quiet ones. A NAT gateway is ~32 USD a month, an interface
+             The quiet ones. A NAT gateway is ~32 USD a month, an interface
              endpoint ~7, an unattached Elastic IP ~3.60. None of them look
              like they are running.
 
@@ -50,7 +50,7 @@ Applying a policy is not evidence that it works. Assumed
 OrganizationAccountAccessRole into Workloads 277606037083 and tried both
 directions.
 
-DENIED — Elastic IP allocation:
+DENIED, Elastic IP allocation:
 
 $ aws ec2 allocate-address --region eu-west-1 --dry-run
 An error occurred (UnauthorizedOperation) ... not authorized to perform:
@@ -58,7 +58,7 @@ ec2:AllocateAddress on resource: arn:aws:ec2:eu-west-1:277606037083:elastic-ip/*
 with an explicit deny in a service control policy:
 arn:aws:organizations::771665904432:policy/o-tcspyaifkn/service_control_policy/p-s9ly2gd2
 
-DENIED — customer-managed KMS key:
+DENIED, customer-managed KMS key:
 
 $ aws kms create-key --region eu-west-1 --description "scp test"
 An error occurred (AccessDeniedException) ... not authorized to perform:
@@ -68,13 +68,13 @@ arn:aws:organizations::771665904432:policy/o-tcspyaifkn/service_control_policy/p
 Both name the policy by ARN, so the denial is provably this policy and not an
 IAM permission gap.
 
-STILL ALLOWED — read and free operations:
+STILL ALLOWED. Read and free operations:
 
 $ aws ec2 describe-vpcs --region eu-west-1 --query 'Vpcs[].VpcId' --output text
 vpc-0f46e5d66fac2ea90   vpc-0c7512967a12869d5
 
 $ aws s3api list-buckets --query 'Buckets[].Name' --output text
-(no output, no error — the Workloads account holds no buckets)
+(no output, no error, the Workloads account holds no buckets)
 
 The second half matters as much as the first. A guardrail that also blocks
 legitimate work gets detached, and a detached guardrail protects nothing.
@@ -97,6 +97,6 @@ legitimate work gets detached, and a detached guardrail protects nothing.
 A useful side effect: kms:CreateKey and secretsmanager:CreateSecret are denied
 while the Terraform for the wound-down app-data key and database secret is
 still in this repository on purpose. So this policy is now a second line of
-defence against the accident docs/NEXT-STEPS.md warns about — a bare
+defence against the accident docs/NEXT-STEPS.md warns about, a bare
 `terraform apply` silently recreating what was destroyed to save money. The
-apply would now fail on those resources rather than succeed quietly.
+apply would now fail on those resources instead of succeeding quietly.
