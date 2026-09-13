@@ -1,0 +1,111 @@
+Cost audit and budget retune
+Date: 2026-09-13
+Context: docs/NEXT-STEPS.md step 4, "a budget alarm at 1 USD".
+
+The task as written was to add a 1 USD alarm. The account already had a budget,
+at 40 USD, so the real task was to retune it. Setting a threshold without first
+knowing the actual spend would have produced an alarm that fires every month on
+normal baseline, which is how alert fatigue starts.
+
+
+1. What the account actually spends
+------------------------------------------------------------------------------
+$ aws budgets describe-budget --account-id 771665904432 \
+    --budget-name novapay-monthly-budget \
+    --query 'Budget.[BudgetLimit.Amount,CalculatedSpend.ActualSpend.Amount,CalculatedSpend.ForecastedSpend.Amount]'
+40.0    3.662    4.292
+
+Month-to-date 3.66 USD, forecast 4.29. Both higher than the 1-2 USD assumed in
+earlier notes. Worth explaining before choosing a threshold.
+
+Note that describe-budget gives this for free. AWS Cost Explorer would give a
+per-service breakdown but charges 0.01 USD per API request, so it was not used;
+the inventory below answers the same question at no cost.
+
+
+2. Inventory of every account — what could be billing
+------------------------------------------------------------------------------
+Management 771665904432, Security 547090165470, Workloads 277606037083.
+The two members reached via OrganizationAccountAccessRole.
+
+                        management   security   workloads
+Elastic IPs                  none       none        none
+NAT gateways                 none       none        none
+Running EC2                  none       none        none
+Customer-managed KMS         none       none        none
+Secrets Manager              none       none        none
+
+The usual suspects for a surprise bill are all absent. An unattached Elastic IP
+alone would be about 3.60 USD a month and would have explained the figure
+exactly — there are none.
+
+S3, via CloudWatch BucketSizeBytes (free; Cost Explorer not needed):
+
+  novapay-cloudtrail-logs-771665904432        68,387,704 B   (~68 MB)
+  novapay-tfstate-771665904432                10,332,348 B   (~10 MB)
+  aws-cloudtrail-logs-771665904432-8f566a03   no datapoint   (empty)
+  mike-first-bucket-2026                      no datapoint   (empty)
+
+78 MB of standard storage is roughly 0.002 USD a month. Not the answer either.
+
+KMS in management returns two AWS-managed keys (free) and one id that
+describe-key rejects as invalid — the CloudTrail CMK scheduled for deletion on
+2026-09-11. Nothing customer-managed is billing.
+
+
+3. Conclusion
+------------------------------------------------------------------------------
+Nothing currently running accounts for 3.66 USD. The spend is historical: it is
+the first six days of September, before the 2026-09-06 wind-down and the
+2026-09-11 CMK removal. The 4.29 USD "forecast" is AWS extrapolating
+month-to-date across the whole month, which overstates the total whenever spend
+stops mid-month, as it did here.
+
+Steady-state cost from 2026-09-13 is cents: S3 storage plus CloudTrail request
+volume. That is what makes a 1 USD alarm meaningful rather than noise, and it is
+why the threshold was chosen after this audit rather than before it.
+
+Two orphan buckets were found and left alone deliberately. Both are empty and
+cost nothing. `aws-cloudtrail-logs-771665904432-8f566a03` follows the naming
+pattern the AWS console generates when a trail is created by hand, so a trail
+was almost certainly created and later deleted without removing its bucket;
+`mike-first-bucket-2026` is unrelated to this project. Neither is Terraform
+managed. Deleting them is the owner's call, not a cleanup to make silently.
+
+
+4. The change
+------------------------------------------------------------------------------
+infra/budget.tf, applied with -target so nothing else moved:
+
+  limit          40 USD  ->  5 USD
+  ACTUAL     > 20, > 35  ->  > 1
+  FORECASTED       none  ->  > 5
+
+The forecast notification is the one that earns its keep: it warns before the
+money is spent, so a resource left running on a test day is caught the next
+morning instead of in the next bill.
+
+$ terraform plan -target=aws_budgets_budget.monthly_cap
+Plan: 0 to add, 1 to change, 0 to destroy.
+
+$ terraform apply budget.tfplan
+Apply complete! Resources: 0 added, 1 changed, 0 destroyed.
+
+Read back from AWS rather than trusted from the apply output:
+
+$ aws budgets describe-budget ... --query 'Budget.[BudgetLimit.Amount,CalculatedSpend.ActualSpend.Amount]'
+5.0     3.662
+
+$ aws budgets describe-notifications-for-budget ...
+ACTUAL       GREATER_THAN   1.0
+FORECASTED   GREATER_THAN   5.0
+
+
+5. Expected side effect
+------------------------------------------------------------------------------
+The ACTUAL > 1 USD notification will fire almost immediately, because September
+is already at 3.66. That is a correct statement about this month, not a
+misconfiguration. From October it should stay quiet.
+
+AWS Budgets updates on a lag and cannot stop spending. It is a bell, not a
+switch.

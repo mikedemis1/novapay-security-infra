@@ -1,7 +1,46 @@
 # Runbook: move detection and alerting to the Security account
 
 **Status:** required before the next `terraform apply` of the platform stack.
-**Risk:** low. Nothing here stores data. The cost is a few minutes without alerting and one email confirmation click.
+**Risk:** low. Nothing here stores data. The cost is one email confirmation click.
+
+> ## Corrections, 2026-09-13
+>
+> This runbook was written in August and was followed on 2026-09-12. It failed,
+> twice, before reaching its first destroy. Three things below were wrong. They
+> are corrected in place; this note records what changed so the diff is not a
+> mystery.
+>
+> **1. Step 1 aborts unless you add a provider back first.** The account
+> baseline applied on 2026-09-11 created three resources through
+> `provider = aws.security`. This tag predates that alias, so a detached
+> checkout leaves them with no provider configuration and Terraform refuses to
+> plan *anything*:
+>
+> ```
+> Error: Provider configuration not present
+> To work with aws_account_alternate_contact.security_security (orphan) its
+> original provider configuration at provider["...aws"].security is required,
+> but it has been removed.
+> ```
+>
+> The other two orphans are `aws_s3_account_public_access_block.security` and
+> `aws_iam_account_password_policy.security`. The fix is in step 1 below and is
+> the one Terraform's own error message recommends.
+>
+> **2. "Expect seven resources" is wrong — there are five.** GuardDuty and
+> Security Hub are not in state at all any more; they were wound down. Nothing
+> is being *moved*. Five alerting resources are destroyed and the whole
+> detection stack is then created fresh in the Security account.
+>
+> **3. Step 3 said a bare `terraform apply`. Do not.** Since the wind-downs and
+> the 2026-09-11 CMK removal, several resources keep their code on purpose while
+> their live instances are gone. A bare apply silently recreates
+> `aws_secretsmanager_secret.db_credentials`, `aws_kms_key.app_data` and
+> `aws_kms_key.cloudtrail_logs`, reversing three deliberate cost decisions.
+>
+> One consequence is good news: the "few minutes without alerting" this runbook
+> used to warn about no longer applies. Detection is already off, so there is no
+> window to lose.
 
 ## Why this is not just an apply
 
@@ -37,30 +76,100 @@ Error: reading Security Hub Organization Configuration (...): InvalidAccessExcep
 ```
 git checkout pre-detection-move    # detached HEAD, deliberately; annotated tag on 35c35cc
 cd infra
+terraform init
+```
+
+**Now add the `aws.security` provider back, temporarily.** Copy this block into
+`providers.tf` on the detached checkout. Do not commit it; it is discarded at
+the end of this phase. Without it every plan aborts with "Provider
+configuration not present" — see the correction note at the top.
+
+```hcl
+provider "aws" {
+  alias  = "security"
+  region = "eu-west-1"
+
+  assume_role {
+    role_arn = "arn:aws:iam::${aws_organizations_account.security.id}:role/OrganizationAccountAccessRole"
+  }
+}
+```
+
+Then plan the destroy:
+
+```
 terraform plan -destroy \
   -target=aws_sns_topic_subscription.security_alerts_email \
   -target=aws_sns_topic_policy.security_alerts \
   -target=aws_cloudwatch_event_target.security_alerts \
   -target=aws_cloudwatch_event_rule.high_severity_findings \
-  -target=aws_sns_topic.security_alerts \
-  -target=aws_securityhub_organization_configuration.main \
-  -target=aws_guardduty_organization_configuration.main
+  -target=aws_sns_topic.security_alerts
 ```
 
-Expect seven resources and nothing else. If anything else appears, stop.
+**Expect exactly five resources.** Confirm with `terraform state list` first if
+you want to see why: the two GuardDuty/Security Hub organisation-configuration
+addresses this runbook originally listed are no longer in state, so targeting
+them is a no-op. If a sixth address appears, or one of the five is missing, stop
+— the state is not what this runbook assumes.
 
 **2. Destroy them.** Same command with `destroy` instead of `plan -destroy`.
 
-Between this step and step 3 there is no alerting. Detection keeps running; only the path to the inbox is down.
+Then discard the temporary provider block before leaving the tag:
 
-**3. Apply the new code.**
+```
+git checkout -- providers.tf
+git status --porcelain          # must print nothing
+```
+
+There is no alerting gap to worry about here any more. GuardDuty and Security
+Hub are already off, so nothing is generating findings that could be missed.
+
+**3. Apply the new code — targeted, never bare.**
 
 ```
 git checkout main
-terraform apply
+git symbolic-ref HEAD           # must print refs/heads/main
+terraform init
 ```
 
-The plan now completes, because nothing is left in state that has to be read through the wrong account.
+A bare `terraform apply` at this point recreates three resources that were
+destroyed on purpose for cost, because their Terraform was deliberately kept.
+Target the detection stack only:
+
+```
+terraform apply \
+  -target=aws_guardduty_detector.management \
+  -target=aws_guardduty_detector.security \
+  -target=aws_guardduty_organization_admin_account.main \
+  -target=aws_guardduty_organization_configuration.main \
+  -target=aws_guardduty_organization_configuration_feature.s3_data_events \
+  -target=aws_guardduty_organization_configuration_feature.ebs_malware_protection \
+  -target=aws_securityhub_account.management \
+  -target=aws_securityhub_account.security \
+  -target=aws_securityhub_organization_admin_account.main \
+  -target=aws_securityhub_organization_configuration.main \
+  -target=aws_sns_topic.security_alerts \
+  -target=aws_sns_topic_policy.security_alerts \
+  -target=aws_sns_topic_subscription.security_alerts_email \
+  -target=aws_cloudwatch_event_rule.high_severity_findings \
+  -target=aws_cloudwatch_event_target.security_alerts
+```
+
+Run `terraform plan` with the same targets first and read the list. The refresh
+error on the SNS topic that step 0 predicts is gone once the destroy in step 2
+has removed it from state.
+
+This designates the Security account as delegated administrator for both
+services, creates its detector and hub, enables S3 and malware protection for
+every member through the organisation configuration rather than on one detector,
+and rebuilds the alert pipeline in the Security account.
+
+**Cost note, added 2026-09-13.** GuardDuty and Security Hub each give a 30-day
+free trial **per account per region**, and each member of an organisation gets
+its own. The Security account has never had either enabled, so this runbook
+costs nothing for 30 days. After that GuardDuty bills on analysed CloudTrail
+volume and Security Hub bills $0.001 per check. Decide before you start whether
+this is a trial window or a permanent control, and write the decision down.
 
 This designates the Security account as delegated administrator for both services, creates its detector and hub, enables S3 and malware protection for every member through the organisation configuration rather than on one detector, and rebuilds the alert pipeline in the Security account.
 
@@ -68,9 +177,18 @@ This designates the Security account as delegated administrator for both service
 
 ## What the plan should destroy, and nothing else
 
-The plan for this change removes nine addresses. Read them against this list
-before typing yes. An address here that is missing, or one present that is not
-here, means the state is not what this runbook assumed.
+**This section describes a bare `terraform apply`, which step 3 above no longer
+tells you to run.** It is kept because the nine addresses below still sit in
+state and will still be destroyed the day someone does run an untargeted apply.
+Read it as a standing hazard list, not as the expected output of step 3 — the
+targeted apply touches none of them.
+
+Two of the nine, `aws_guardduty_detector_feature.*`, may already be gone: the
+detectors were wound down after this was written. Confirm with
+`terraform state list` rather than trusting the count.
+
+An address here that is missing, or one present that is not here, means the
+state is not what this runbook assumed.
 
 | Address | Why it goes |
 |---|---|

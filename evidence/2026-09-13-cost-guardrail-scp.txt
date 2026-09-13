@@ -1,0 +1,102 @@
+Cost guardrail SCP — applied and negative-tested
+Date: 2026-09-13
+Policy: novapay-cost-guardrails, p-s9ly2gd2
+Attached to: Workloads (ou-f915-pkfqytr1) and Security (ou-f915-bvzrbudp)
+
+
+1. Why a policy and not a budget
+------------------------------------------------------------------------------
+AWS has no hard spending cap. Budgets notify and nothing else. AWS Budget
+Actions can apply a policy automatically when a threshold is crossed, but they
+run off billing data that lags by hours, so something started at 10:00 can bill
+until the evening before the action fires. That is a net, not a brake.
+
+A service control policy refuses the API call at the moment it is made. No
+billing data is involved, there is no delay, and nothing is created so nothing
+is charged. It is also free.
+
+The three policies applied on 2026-09-11 deny leaving the organisation,
+tampering with logging and detection, and operating outside eu-west-1. None of
+them denies a single billable service. This is the fourth.
+
+
+2. What it denies
+------------------------------------------------------------------------------
+Compute      RunInstances, StartInstances, EKS cluster and nodegroup, ECS
+             cluster, Lightsail, Elastic Beanstalk environment, EMR job flow,
+             SageMaker notebook and endpoint
+
+Networking   NAT gateway, Elastic IP allocation, VPC interface endpoint,
+             Transit Gateway, Client VPN, load balancer, Global Accelerator,
+             Direct Connect
+             — the quiet ones. A NAT gateway is ~32 USD a month, an interface
+             endpoint ~7, an unattached Elastic IP ~3.60. None of them look
+             like they are running.
+
+Data         RDS instance and cluster, ElastiCache, MemoryDB, Redshift, FSx,
+             EFS
+
+Small and    kms:CreateKey (~1 USD/mo), secretsmanager:CreateSecret (~0.40),
+recurring    route53:CreateHostedZone (~0.50), AWS Config recorder and rules
+
+Deliberately NOT denied, because the plan needs them: GuardDuty, Security Hub,
+Lambda, EventBridge, SNS, S3, IAM, CloudWatch. Denying those would block the
+detection work this repository exists to demonstrate.
+
+
+3. The negative test
+------------------------------------------------------------------------------
+Applying a policy is not evidence that it works. Assumed
+OrganizationAccountAccessRole into Workloads 277606037083 and tried both
+directions.
+
+DENIED — Elastic IP allocation:
+
+$ aws ec2 allocate-address --region eu-west-1 --dry-run
+An error occurred (UnauthorizedOperation) ... not authorized to perform:
+ec2:AllocateAddress on resource: arn:aws:ec2:eu-west-1:277606037083:elastic-ip/*
+with an explicit deny in a service control policy:
+arn:aws:organizations::771665904432:policy/o-tcspyaifkn/service_control_policy/p-s9ly2gd2
+
+DENIED — customer-managed KMS key:
+
+$ aws kms create-key --region eu-west-1 --description "scp test"
+An error occurred (AccessDeniedException) ... not authorized to perform:
+kms:CreateKey on resource: * with an explicit deny in a service control policy:
+arn:aws:organizations::771665904432:policy/o-tcspyaifkn/service_control_policy/p-s9ly2gd2
+
+Both name the policy by ARN, so the denial is provably this policy and not an
+IAM permission gap.
+
+STILL ALLOWED — read and free operations:
+
+$ aws ec2 describe-vpcs --region eu-west-1 --query 'Vpcs[].VpcId' --output text
+vpc-0f46e5d66fac2ea90   vpc-0c7512967a12869d5
+
+$ aws s3api list-buckets --query 'Buckets[].Name' --output text
+(no output, no error — the Workloads account holds no buckets)
+
+The second half matters as much as the first. A guardrail that also blocks
+legitimate work gets detached, and a detached guardrail protects nothing.
+
+
+4. Limits, stated plainly
+------------------------------------------------------------------------------
+- **SCPs never apply to the management account.** That is an AWS rule, not a
+  configuration choice. Management 771665904432 holds the organisation, the log
+  bucket and the Terraform state, and remains protected only by root MFA, its
+  IAM configuration and the budget alert. Most billable resources live in
+  Workloads, which is covered, but this is a real gap and not a small one.
+- This is default-deny, lifted on purpose. The test-day model is: detach the
+  policy or add a narrow exception, do the work, capture evidence, put it back.
+- It stops resources being *created*. It does not stop something already
+  running from billing, and there is nothing running today to stop.
+- It is not a spending cap. Data transfer, request charges and storage growth
+  are all still possible within the services that remain allowed.
+
+A useful side effect: kms:CreateKey and secretsmanager:CreateSecret are denied
+while the Terraform for the wound-down app-data key and database secret is
+still in this repository on purpose. So this policy is now a second line of
+defence against the accident docs/NEXT-STEPS.md warns about — a bare
+`terraform apply` silently recreating what was destroyed to save money. The
+apply would now fail on those resources rather than succeed quietly.

@@ -166,6 +166,20 @@ member accounts. Evidence: `evidence/2026-09-11-scps-and-account-baseline.txt`.
 
 ### 3. GuardDuty and Security Hub, administered from the Security account
 
+> **Scheduled for 10-16 October 2026, not before.** Both services bill after a
+> 30-day free trial that is granted **per account per region**. The Security
+> account has never used either, so running this inside a deliberately chosen
+> window costs nothing, while running it now would burn the trial during weeks
+> when there is nothing yet to detect. See
+> `studies/Career Planning/2026-09-12-execution-programme.md`, week 5.
+
+> **The runbook was corrected on 2026-09-13 after it failed in practice.** It
+> promised seven resources where state holds five, told you to run a bare
+> `terraform apply` that would recreate three deliberately destroyed resources,
+> and did not mention that the 2026-09-11 account baseline leaves three orphans
+> which abort the plan on a detached checkout. Use the corrected version; the
+> note at the top of it explains each change.
+
 This is the one step that genuinely needs the tag, and only for its destroy
 half. Follow `docs/runbooks/move-detection-to-security-account.md` exactly;
 its own step 0 through step 4 are authoritative. The shape, so it is not a
@@ -188,13 +202,38 @@ week fixing. That runbook runs entirely from `main`.
 
 ### 4. Safeguards from the zero-spend decision (2026-09-11)
 
-- [ ] Root MFA on all three accounts (one is currently missing).
+Read back from the live account on 2026-09-13, so these are facts rather than
+recollections.
+
+- [ ] Root MFA on all three accounts (one is currently missing). Console only —
+      there is no API for root MFA. Management `771665904432`, security
+      `547090165470`, workloads `277606037083`; the two members need a root
+      password reset first.
 - [ ] Delete the two console-created IAM users with long-lived access keys in
-      the management account (one has no MFA).
+      the management account.
+
+      > **Do not start with `cli-admin`.** It is the identity every CLI session
+      > in this project authenticates as, including the ones that run the
+      > detection work in step 3. Deleting it first locks you out of your own
+      > account. Order: stand up IAM Identity Center access (the administrator
+      > permission set already exists in `identity_center.tf`), prove a real
+      > command works through it, and only then delete the users.
+
+      | User | Access keys | MFA |
+      |---|---|---|
+      | `cli-admin` | 1, created 2026-05-11 | **none** |
+      | `mike-admin` | **2**, created 2026-05-15 and 2026-07-15 | yes |
+
+      Zero-risk first move: `aws iam get-access-key-last-used` on both of
+      `mike-admin`'s keys. One of them is almost certainly dead. Deactivate it
+      today; it costs nothing and removes a live credential.
 - [ ] Check for a console-made CloudTrail trail in `eu-north-1` that may still
       bill per event outside this repository's Terraform.
-- [ ] A budget alarm at 1 USD, so a forgotten test-day resource pages the
-      next morning instead of the next bill.
+- [ ] Lower the budget alarm. It is **not** missing — `novapay-monthly-budget`
+      exists at **40 USD**, which under a near-zero-spend model would never warn
+      in time. Set it to 1 USD with a subscription to a mailbox that is actually
+      read. Remember that AWS Budgets updates on a lag and is a bell, not a
+      switch: a 1 USD alert does not make the account free.
 
 ### 5. Then, outside this repository
 
