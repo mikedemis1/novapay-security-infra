@@ -1,0 +1,123 @@
+IAM access key hygiene, management account 771665904432
+Date: 2026-09-13
+Context: docs/NEXT-STEPS.md step 4, first and lowest-risk action.
+
+Goal: remove a long-lived credential without locking anyone out. Deactivate
+rather than delete, so the action is reversible while it is observed.
+
+Access key IDs below are truncated to their last four characters. The first
+version of this file carried them in full and the repository's own gitleaks
+gate failed the pull request with eleven alerts.
+
+The gate's label was imprecise and its decision was right. An access key ID is
+the public half of a credential — it is an identifier, closer to a username,
+and it appears in CloudTrail and in the IAM console; it cannot authenticate
+anything on its own, and the forty-character secret half is not in this file or
+anywhere else in this repository. So this was not a leaked secret.
+
+It was still worth removing. On a public repository, naming live key IDs beside
+the account number is reconnaissance: it tells someone exactly which
+credentials exist and what to target. The evidence loses nothing by truncation,
+because the finding is *which* key went unused for two months, not what its
+full identifier was. Four characters keep the three keys distinguishable, which
+is all the argument needs.
+
+Dismissing the alert was the other option. Suppressing your own gate to publish
+credential material is not a habit worth having, and this file would then have
+documented the wrong lesson.
+
+
+1. What existed
+------------------------------------------------------------------------------
+$ aws iam list-users --query 'Users[].UserName' --output text
+cli-admin	mike-admin
+
+$ aws iam list-access-keys --user-name mike-admin \
+    --query 'AccessKeyMetadata[].[AccessKeyId,Status,CreateDate]' --output text
+AKIA...LRNZ	Active	2026-07-15T18:01:06+00:00
+AKIA...OWVN	Active	2026-05-15T16:39:56+00:00
+
+$ aws iam list-mfa-devices --user-name cli-admin  --query 'MFADevices[].SerialNumber' --output text
+(empty — cli-admin has no MFA)
+
+$ aws iam list-mfa-devices --user-name mike-admin --query 'MFADevices[].SerialNumber' --output text
+arn:aws:iam::771665904432:mfa/mike-admin
+
+
+2. Which key was actually dead
+------------------------------------------------------------------------------
+Last-used is the deciding evidence. Creation date is not: the older key is not
+automatically the unused one.
+
+$ aws iam get-access-key-last-used --access-key-id <id>
+
+AKIA...LRNZ   mike-admin   2026-09-06T19:03:00Z   kms   eu-west-1
+AKIA...OWVN   mike-admin   2026-07-15T16:32:00Z   ec2   eu-west-1
+AKIA...O2XG   cli-admin    2026-09-12T19:10:00Z   iam   us-east-1
+
+AKIA...OWVN had not been used for two months.
+
+
+3. Where the keys live
+------------------------------------------------------------------------------
+$ aws configure list-profiles
+default
+
+$ aws configure get aws_access_key_id --profile default
+AKIA...O2XG
+
+Only cli-admin is configured on this machine. Neither of mike-admin's keys is
+present locally, so this evidence cannot prove where they are used — another
+machine, a CI secret and a console-issued credential are all possible. That
+uncertainty is why the key was deactivated rather than deleted, and why the
+still-active key was left alone.
+
+
+4. The change
+------------------------------------------------------------------------------
+$ aws iam update-access-key --user-name mike-admin \
+    --access-key-id AKIA...OWVN --status Inactive
+
+$ aws iam list-access-keys --user-name mike-admin \
+    --query 'AccessKeyMetadata[].[AccessKeyId,Status]' --output text
+AKIA...LRNZ	Active
+AKIA...OWVN	Inactive
+
+Reversible with the command below. The truncated id is not copy-pasteable by
+design; take the full one from `aws iam list-access-keys --user-name mike-admin`
+or from the IAM console at the moment you need it.
+
+$ aws iam update-access-key --user-name mike-admin \
+    --access-key-id AKIA...OWVN --status Active
+
+
+5. What is still open
+------------------------------------------------------------------------------
+- cli-admin still has an active long-lived key and no MFA. It is also the
+  identity every CLI session in this project authenticates as, so it cannot be
+  removed until IAM Identity Center access is stood up and proven to work.
+  Deleting it first would lock this account's own operator out.
+- mike-admin's remaining key is still active and still long-lived.
+- Root MFA is not yet enabled on all three accounts.
+
+The intent of step 4 is to end long-lived keys entirely, not to prune them. This
+file records the first safe step, not the finished control.
+
+
+6. Console-made CloudTrail trail in eu-north-1 — checked, none found
+------------------------------------------------------------------------------
+Step 4 asks whether a trail was ever created by hand in another region and is
+still billing per event outside this repository's Terraform.
+
+$ aws cloudtrail describe-trails --region eu-north-1 \
+    --query 'trailList[].[Name,HomeRegion,IsOrganizationTrail]' --output text
+novapay-org-trail	eu-west-1	True
+
+$ aws cloudtrail list-trails --region eu-west-1 \
+    --query 'Trails[].[Name,HomeRegion]' --output text
+novapay-org-trail	eu-west-1
+
+The single result is not a second trail. It is the organisation trail itself,
+which is multi-region and therefore visible from eu-north-1 while its home
+region stays eu-west-1. list-trails confirms exactly one trail exists in the
+account. Nothing to delete.
