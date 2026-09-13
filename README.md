@@ -213,6 +213,32 @@ Stated plainly, because a lab that claims to be more than it is fails the first 
 - **The state bucket is encrypted with SSE-S3, not a customer-managed key.** State holds a generated database password in clear text, so this is a real weakness and not a stylistic one. It is deferred because a CMK on the state bucket is the one encryption change that can lock you out of your own state, and doing it safely is a runbook: create the key, grant access, prove a read, then switch the bucket default.
 - **One root account still lacks MFA.** Tracked, not forgotten.
 
+## What I'd Improve
+
+The limits above say what is missing. This says which of it I would fix first
+and why.
+
+- **VPC flow logs.** Nothing here records which address talked to which, and
+  delivering them means widening the bucket policy that protects the audit
+  trail, so it needs a deliberate change, not a default. This is the largest
+  gap in what the estate could reconstruct after an incident.
+- **The CloudTrail, GuardDuty, Security Hub and Config denies are attached but
+  never tamper-tested.** The region deny was proven by making the denied call
+  and reading the refusal. The other four share the same mechanism but were
+  never tested that way, because testing a deny on `StopLogging` means
+  actually calling it against the one detective control still running. That
+  is weaker evidence than the region row has, and I would rather prove it on
+  a disposable trail than keep assuming the mechanism transfers.
+- **The state bucket is encrypted with SSE-S3, not a customer-managed key.**
+  Terraform state holds a generated database password in clear text, so this
+  is a real weakness. It is deferred because a CMK on a state bucket is the
+  one encryption change that can lock you out of your own state, and doing it
+  safely needs a runbook: create the key, grant access, prove a read, then
+  switch the bucket default.
+- **No tested restore.** State is versioned and there is no data tier yet, so
+  nothing has actually been restored. A DORA-adjacent claim about resilience
+  is not worth much until something has been broken and brought back.
+
 ## Layout
 
 ```
