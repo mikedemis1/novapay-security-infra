@@ -54,14 +54,14 @@ the row now reads the way it always claimed to.
 ### B2, management to member accounts
 
 This table was rewritten on 2026-09-06 after its claims were read back from the
-organisation rather than from the code. One row was accurate, two overstated
+organisation instead of the code. One row was accurate, two overstated
 their scope, and two described policy that does not exist. The Status column now
 distinguishes what is enforced from what is only written.
 
 | STRIDE | Threat | Control | Status |
 |---|---|---|---|
 | Repudiation | Member account stops or deletes its own trail | `DenyTrailTampering`: `cloudtrail:StopLogging`, `cloudtrail:DeleteTrail` | live on both units since 2026-09-11 (`novapay-protect-security-services`, `p-znh6pzob`) |
-| Repudiation | Trail narrowed rather than deleted, so it stays green and records nothing | `DenyTrailTampering` also denies `cloudtrail:UpdateTrail` and `cloudtrail:PutEventSelectors` | closed 2026-09-11; attached to both units, not tamper-tested (see below) |
+| Repudiation | Trail narrowed and not deleted, so it stays green and records nothing | `DenyTrailTampering` also denies `cloudtrail:UpdateTrail` and `cloudtrail:PutEventSelectors` | closed 2026-09-11; attached to both units, not tamper-tested (see below) |
 | Tampering | Detection disabled in a member account | `DenyGuardDutyTampering`, `DenySecurityHubTampering`, `DenyConfigTampering` | policy live on both units since 2026-09-11, but GuardDuty and Security Hub were wound down on 2026-09-06, so it currently guards services that are not running |
 | Elevation | Account leaves the organisation to escape the guardrails | `DenyLeavingOrganization`: `organizations:LeaveOrganization` and `account:CloseAccount` | live at the root since 2026-09-11 (`novapay-base-guardrails`, `p-8ryv7lhp`), so it covers every account in the organisation, and `CloseAccount` is now denied too |
 | Tampering | Resources created outside the EU | region deny, `eu-west-1` only, global services excluded by `NotAction` | live on both units since 2026-09-11 (`novapay-region-deny`, `p-pyxqnvs4`) and **tested**: `ec2:DescribeVpcs` in `eu-central-1` refused from inside both member accounts with an explicit deny naming that policy id |
@@ -96,7 +96,7 @@ from inside each member account and reading the refusal, which names the policy
 id. The trail, GuardDuty, Security Hub and Config denies in
 `protect_security_services` were not tested that way, because the only real test
 of a deny on `cloudtrail:StopLogging` is to call `StopLogging`, and a policy not
-in force would then stop the organisation trail — the one detective control
+in force would then stop the organisation trail, the one detective control
 still running. They share a mechanism with the deny that was tested, and they
 are attached; that is weaker evidence than the region row has, and this
 paragraph exists so the difference is not quietly rounded up. Read back in
@@ -109,7 +109,7 @@ paragraph exists so the difference is not quietly rounded up. Read back in
 | STRIDE | Threat | Control | Status |
 |---|---|---|---|
 | Tampering | Log objects altered after the fact | log-file validation, S3 versioning | live |
-| Information disclosure | Logs readable by anyone who can read the bucket | SSE-S3 (no customer-managed key) | **accepted 2026-09-11: a CMK was tried, never actually encrypted a log object (per-object PutObject encryption always beat the bucket default), and was dropped rather than fixed since it was pure unused cost. Bucket-read now genuinely equals log-read, with no scoped-decrypt control on top of it — this is the honest residual risk, not the earlier false claim of one** |
+| Information disclosure | Logs readable by anyone who can read the bucket | SSE-S3 (no customer-managed key) | **accepted 2026-09-11: a CMK was tried, never actually encrypted a log object (per-object PutObject encryption always beat the bucket default), and was dropped instead of fixed since it was pure unused cost. Bucket-read now genuinely equals log-read, with no scoped-decrypt control on top of it. This is the honest residual risk, not the earlier false claim of one** |
 | Tampering | Log objects deleted | versioning only | **gap: no deny statement, no object lock** |
 | Denial of service | Detection findings never reach a person | EventBridge to SNS | the rule and topic still exist, but detection was wound down on 2026-09-06, so nothing can generate a finding to deliver |
 
@@ -126,7 +126,7 @@ still justifies keeping the trail is log-file validation, multi-region coverage
 and organisation scope, all of which are real and were verified. The key is
 carried along by `prevent_destroy` and is the weakest euro in the estate.
 
-The deletion gap matters more than it looks: the design once claimed a bucket policy denying deletion from other accounts, and no such statement existed. The claim was removed rather than the gap being hidden.
+The deletion gap matters more than it looks: the design once claimed a bucket policy denying deletion from other accounts, and no such statement existed. The claim was removed instead of the gap being hidden.
 
 ### B4 to B6, network and cluster
 
@@ -148,9 +148,9 @@ checks on every pull request.
 | K04 lack of centralised policy enforcement | Policy applied by convention | Kyverno cluster policies | enforced |
 | K06 broken authentication | Cluster API open to the internet | endpoint allow list now required | enforced |
 | K07 missing network segmentation | Lateral movement between pods | default-deny plus DNS-only egress | enforced, and initially not working at all |
-| K07 | DNS used as an exfiltration channel | egress scoped to CoreDNS rather than port 53 anywhere | enforced, never tested |
+| K07 | DNS used as an exfiltration channel | egress scoped to CoreDNS, not port 53 anywhere | enforced, never tested |
 | K08 secrets management failures | Credential readable by the wrong pod | Secrets Manager, access only through Secrets Manager; the customer-managed key was never applied | wound down 2026-09-06 with the secret |
-| K09 misconfigured logging | No record of cluster activity | control plane audit logs on | enforced, though inherited from a module default rather than chosen |
+| K09 misconfigured logging | No record of cluster activity | control plane audit logs on | enforced, though inherited from a module default and not chosen |
 
 The K07 row is the honest one. Those policies existed and were enforced by nothing for the whole first attempt, because the VPC CNI does not act on NetworkPolicy objects unless told to. They were only found because the test tried to violate them instead of confirming they existed.
 
@@ -176,5 +176,5 @@ The K07 row is the honest one. Those policies existed and were enforced by nothi
 1. Root MFA on the account whose root email is publicly readable, then the garbage-collection request for the leaked commits.
 2. The administrator IAM user with a long-lived key and no MFA in the management account.
 3. Deletion protection on the log bucket, and moving it out of the management account.
-4. AWS Config and a Security Hub standard, so that drift from this model is detected rather than reviewed by hand.
+4. AWS Config and a Security Hub standard, so that drift from this model is detected automatically instead of reviewed by hand.
 5. A tested restore, once there is anything to restore.
