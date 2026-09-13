@@ -27,7 +27,7 @@
 > `aws_iam_account_password_policy.security`. The fix is in step 1 below and is
 > the one Terraform's own error message recommends.
 >
-> **2. "Expect seven resources" is wrong — there are five.** GuardDuty and
+> **2. "Expect seven resources" is wrong. There are five.** GuardDuty and
 > Security Hub are not in state at all any more; they were wound down. Nothing
 > is being *moved*. Five alerting resources are destroyed and the whole
 > detection stack is then created fresh in the Security account.
@@ -82,7 +82,7 @@ terraform init
 **Now add the `aws.security` provider back, temporarily.** Copy this block into
 `providers.tf` on the detached checkout. Do not commit it; it is discarded at
 the end of this phase. Without it every plan aborts with "Provider
-configuration not present" — see the correction note at the top.
+configuration not present". See the correction note at the top.
 
 ```hcl
 provider "aws" {
@@ -110,7 +110,7 @@ terraform plan -destroy \
 you want to see why: the two GuardDuty/Security Hub organisation-configuration
 addresses this runbook originally listed are no longer in state, so targeting
 them is a no-op. If a sixth address appears, or one of the five is missing, stop
-— the state is not what this runbook assumes.
+, the state is not what this runbook assumes.
 
 **2. Destroy them.** Same command with `destroy` instead of `plan -destroy`.
 
@@ -124,7 +124,7 @@ git status --porcelain          # must print nothing
 There is no alerting gap to worry about here any more. GuardDuty and Security
 Hub are already off, so nothing is generating findings that could be missed.
 
-**3. Apply the new code — targeted, never bare.**
+**3. Apply the new code, targeted, never bare.**
 
 ```
 git checkout main
@@ -180,7 +180,7 @@ This designates the Security account as delegated administrator for both service
 **This section describes a bare `terraform apply`, which step 3 above no longer
 tells you to run.** It is kept because the nine addresses below still sit in
 state and will still be destroyed the day someone does run an untargeted apply.
-Read it as a standing hazard list, not as the expected output of step 3 — the
+Read it as a standing hazard list, not as the expected output of step 3, the
 targeted apply touches none of them.
 
 Two of the nine, `aws_guardduty_detector_feature.*`, may already be gone: the

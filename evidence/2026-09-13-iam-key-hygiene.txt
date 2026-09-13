@@ -3,14 +3,14 @@ Date: 2026-09-13
 Context: docs/NEXT-STEPS.md step 4, first and lowest-risk action.
 
 Goal: remove a long-lived credential without locking anyone out. Deactivate
-rather than delete, so the action is reversible while it is observed.
+instead of delete, so the action is reversible while it is observed.
 
 Access key IDs below are truncated to their last four characters. The first
 version of this file carried them in full and the repository's own gitleaks
 gate failed the pull request with eleven alerts.
 
 The gate's label was imprecise and its decision was right. An access key ID is
-the public half of a credential — it is an identifier, closer to a username,
+the public half of a credential. It is an identifier, closer to a username,
 and it appears in CloudTrail and in the IAM console; it cannot authenticate
 anything on its own, and the forty-character secret half is not in this file or
 anywhere else in this repository. So this was not a leaked secret.
@@ -38,7 +38,7 @@ AKIA...LRNZ	Active	2026-07-15T18:01:06+00:00
 AKIA...OWVN	Active	2026-05-15T16:39:56+00:00
 
 $ aws iam list-mfa-devices --user-name cli-admin  --query 'MFADevices[].SerialNumber' --output text
-(empty — cli-admin has no MFA)
+(empty, cli-admin has no MFA)
 
 $ aws iam list-mfa-devices --user-name mike-admin --query 'MFADevices[].SerialNumber' --output text
 arn:aws:iam::771665904432:mfa/mike-admin
@@ -67,9 +67,9 @@ $ aws configure get aws_access_key_id --profile default
 AKIA...O2XG
 
 Only cli-admin is configured on this machine. Neither of mike-admin's keys is
-present locally, so this evidence cannot prove where they are used — another
+present locally, so this evidence cannot prove where they are used, another
 machine, a CI secret and a console-issued credential are all possible. That
-uncertainty is why the key was deactivated rather than deleted, and why the
+uncertainty is why the key was deactivated and not deleted, and why the
 still-active key was left alone.
 
 
@@ -104,7 +104,7 @@ The intent of step 4 is to end long-lived keys entirely, not to prune them. This
 file records the first safe step, not the finished control.
 
 
-6. Console-made CloudTrail trail in eu-north-1 — checked, none found
+6. Console-made CloudTrail trail in eu-north-1, checked, none found
 ------------------------------------------------------------------------------
 Step 4 asks whether a trail was ever created by hand in another region and is
 still billing per event outside this repository's Terraform.

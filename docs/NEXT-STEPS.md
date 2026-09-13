@@ -1,7 +1,7 @@
 # Next steps
 
 Written 2026-09-11 because a working session was found with the repository
-checked out at a detached HEAD on the `pre-detection-move` tag — a month
+checked out at a detached HEAD on the `pre-detection-move` tag, a month
 behind `main`, missing this very file, `evidence/`, and everything from PR #2
 onward. Any agent reasoning from that checkout was reasoning from a stale
 snapshot and had no way to know it. This file exists so that never happens
@@ -14,7 +14,7 @@ git symbolic-ref HEAD
 ```
 
 It must print `refs/heads/main`. If it errors ("not a symbolic ref"), you are
-on a detached HEAD — most likely that tag, left over from someone following
+on a detached HEAD, most likely that tag, left over from someone following
 `docs/runbooks/move-detection-to-security-account.md`'s own instruction to
 check it out and never returning. Run `git checkout main` before trusting the
 README, this file, or any control's stated status. The one exception is the
@@ -43,8 +43,8 @@ access key.
 
 Decided 2026-09-11 by a five-agent review (factual, senior engineer, hiring
 manager, cost advocate, consistency reviewer; 4 of 5 for this outcome). The
-key has never encrypted a single log object — `evidence/2026-09-06-landing-zone-baseline.txt`
-shows the trail with no `KmsKeyId` and live objects as `AES256` — so it costs
+key has never encrypted a single log object, `evidence/2026-09-06-landing-zone-baseline.txt`
+shows the trail with no `KmsKeyId` and live objects as `AES256`. So it costs
 roughly 1-2 USD a month for a control that does not run. The trail itself is
 free and stays: it is the only detective control left on an organisation that
 still has a leaked root email and one account without root MFA (see step 3).
@@ -53,11 +53,11 @@ still has a leaked root email and one account without root MFA (see step 3).
       line from the trail resource; set the bucket's default encryption back
       to `AES256`. Done 2026-09-11.
 - [x] `infra/kms.tf`: remove `prevent_destroy` from this key only. The trail's
-      own `prevent_destroy` (`cloudtrail.tf`) is untouched — the trail is not
+      own `prevent_destroy` (`cloudtrail.tf`) is untouched, the trail is not
       being removed, only the key. Done 2026-09-11.
 - [x] `terraform apply`, then `aws s3api head-object` on a fresh log to prove
       nothing references the key before scheduling its deletion. Done
-      2026-09-11 — the trail's `kms_key_id` was already unset in live state
+      2026-09-11, the trail's `kms_key_id` was already unset in live state
       (it was never actually applied), so the apply only touched the bucket
       encryption config and the key's own tags/policy. `head-object` confirmed
       `AES256`, no `SSEKMSKeyId`. Evidence:
@@ -69,30 +69,30 @@ still has a leaked root email and one account without root MFA (see step 3).
       `aws kms cancel-key-deletion` until then if needed.
 - [x] Update the README row and supersede the two `SECURITY_DECISIONS.md`
       entries that argued for keeping the key, in the file's existing
-      "Status: superseded" style. Done 2026-09-11 — see `README.md`'s control
+      "Status: superseded" style. Done 2026-09-11. See `README.md`'s control
       table and "What broke", and the two `Status: superseded`/`partially
       superseded` notes in `SECURITY_DECISIONS.md`, plus a new
-      `## 2026-09-11 — The CloudTrail CMK is dropped instead of fixed` entry
+      `## 2026-09-11, The CloudTrail CMK is dropped instead of fixed` entry
       there recording the decision itself.
 
 **Note for step 2 below:** the plan for step 2's SCPs and account baseline
-targets was re-verified after step 1 and is unaffected by it — the key removal
+targets was re-verified after step 1 and is unaffected by it, the key removal
 touched only `aws_kms_key.cloudtrail_logs`, its alias, and the bucket
 encryption config, none of which step 2's targets depend on.
 
-### 2. Apply the account baseline and the SCPs — targeted, not a bare apply
+### 2. Apply the account baseline and the SCPs: targeted, not a bare apply
 
 **Verified 2026-09-11 with a real `terraform plan` against the live account
 (credentials are configured in this environment; the plan is read-only and
 safe to rerun any time).** A plain `terraform apply` here is 41 to add, 26 to
 change, 2 to destroy, and it is not just the SCPs and the baseline. The same
 apply would also recreate `aws_secretsmanager_secret.db_credentials` and
-`aws_kms_key.app_data` — the two rows the README marks
+`aws_kms_key.app_data`, the two rows the README marks
 `wound down 2026-09-06, and never re-encrypted` and `wound down 2026-09-06`.
 Their Terraform was never removed, only their deployed instances were
 destroyed, so an untargeted apply silently reverses that cost decision. As of
 step 1 above, `aws_kms_key.cloudtrail_logs` and `aws_kms_alias.cloudtrail_logs`
-are now in the same boat — their code also stays while their live instances
+are now in the same boat, their code also stays while their live instances
 are gone, so a bare apply would recreate those too. Do not run a bare
 `terraform apply` in this repository until every such resource has either been
 removed from the code or is a deliberate choice made that day.
@@ -105,19 +105,19 @@ with the evidence kept as proof it ran.
 rather than from the code, and the region deny was tested from inside both
 member accounts. Evidence: `evidence/2026-09-11-scps-and-account-baseline.txt`.
 
-- [x] Do step 1 (the KMS key removal) first — the plan above still shows
+- [x] Do step 1 (the KMS key removal) first, the plan above still shows
       `aws_cloudtrail.org_trail` and `aws_kms_key.cloudtrail_logs` as
       in-place updates from the *old* code; applying this step before step 1
       would apply the key reference you are about to remove. Done 2026-09-11,
       before this step.
-- [x] SCPs (replaces `workloads_guardrails` with three narrower policies —
+- [x] SCPs (replaces `workloads_guardrails` with three narrower policies. That is
       expected, and named in the move-detection runbook's own destroy list).
       Done 2026-09-11: 8 added, 3 changed, 0 destroyed. `base_guardrails`
       `p-8ryv7lhp` at the root, `protect_security_services` `p-znh6pzob` and
       `region_deny` `p-pyxqnvs4` on both units. The Security unit carried no
       policy at all before this; it now carries two. The old
       `novapay-workloads-guardrails` (`p-wgirycnf`) is still attached to
-      Workloads on purpose — it is step 3's runbook that destroys it, and
+      Workloads on purpose. It is step 3's runbook that destroys it, and
       applying the new policies first means the unit is briefly
       over-governed instead of ungoverned, closing the gap that runbook
       predicted and accepted:
@@ -136,7 +136,7 @@ member accounts. Evidence: `evidence/2026-09-11-scps-and-account-baseline.txt`.
       Password policy (14 / reuse 24 / age 90) and the S3 account-level public
       access block read back true on all three accounts; EBS encryption by
       default true in Workloads; the ORGANIZATION Access Analyzer created in
-      eu-west-1. Read an analyzer back with an explicit `--region` — this
+      eu-west-1. Read an analyzer back with an explicit `--region`. This
       environment's default CLI region is eu-north-1 and the call returns an
       empty list there:
       ```
@@ -155,7 +155,7 @@ member accounts. Evidence: `evidence/2026-09-11-scps-and-account-baseline.txt`.
       ```
 - [x] Re-run a plain `terraform plan` after both, confirm the only remaining
       diff is the app-data KMS key, the Secrets Manager secret, and the
-      GuardDuty/Security Hub move (step 3 below) — nothing else unexplained.
+      GuardDuty/Security Hub move (step 3 below). Nothing else unexplained.
       Done 2026-09-11: 24 to add, 18 to change, 2 to destroy, every address
       accounted for in the evidence file. Two things the original wording did
       not anticipate, neither of them damage: the CloudTrail key and alias
@@ -186,7 +186,7 @@ its own step 0 through step 4 are authoritative. The shape, so it is not a
 surprise mid-runbook:
 
 - [ ] Phase A (destroy the old management-account resources):
-      `git checkout pre-detection-move` — detached HEAD, deliberate, and
+      `git checkout pre-detection-move`, detached HEAD, deliberate, and
       temporary for this phase only.
 - [ ] Phase B (apply the new code): `git checkout main` immediately after the
       destroy, before the apply. Confirm with `git symbolic-ref HEAD` again.
@@ -195,7 +195,7 @@ surprise mid-runbook:
 
 **Do not use the tag for anything else.** The other runbook,
 `docs/runbooks/wind-down-billable-resources.md`, explicitly corrects an
-earlier draft of itself that said to check out the tag throughout — at that
+earlier draft of itself that said to check out the tag throughout. At that
 tag the Kubernetes/Helm providers are still wired into `infra/`, which is the
 exact "unplannable from a clean checkout" failure this repository spent a
 week fixing. That runbook runs entirely from `main`.
@@ -205,10 +205,16 @@ week fixing. That runbook runs entirely from `main`.
 Read back from the live account on 2026-09-13, so these are facts rather than
 recollections.
 
-- [ ] Root MFA on all three accounts (one is currently missing). Console only —
-      there is no API for root MFA. Management `771665904432`, security
-      `547090165470`, workloads `277606037083`; the two members need a root
-      password reset first.
+- [x] Root MFA on all three accounts. **Done 2026-09-13**, read back with
+      `get-account-summary`: management, security and workloads all report
+      `AccountMFAEnabled = 1`. Devices are `Authapp` and
+      `novapay-management-root` on management, `novapay-security-root`,
+      `novapay-workloads-root`. Evidence:
+      `evidence/2026-09-13-root-mfa.txt`.
+
+      Console only. There is no API for root MFA, which is also why it is the
+      one control here that cannot be expressed in Terraform. Worth saying out
+      loud rather than leaving as a silent gap in the code.
 - [ ] Delete the two console-created IAM users with long-lived access keys in
       the management account.
 
@@ -229,7 +235,7 @@ recollections.
       today; it costs nothing and removes a live credential.
 - [ ] Check for a console-made CloudTrail trail in `eu-north-1` that may still
       bill per event outside this repository's Terraform.
-- [ ] Lower the budget alarm. It is **not** missing — `novapay-monthly-budget`
+- [ ] Lower the budget alarm. It is **not** missing, `novapay-monthly-budget`
       exists at **40 USD**, which under a near-zero-spend model would never warn
       in time. Set it to 1 USD with a subscription to a mailbox that is actually
       read. Remember that AWS Budgets updates on a lag and is a bell, not a
@@ -246,6 +252,6 @@ work begins.
 
 Confirm `git symbolic-ref HEAD` prints `refs/heads/main` before trusting a
 single file here, the one exception being the two-phase dance in step 3
-above — and return to `main` the moment that destroy step finishes. Tick a
+above, and return to `main` the moment that destroy step finishes. Tick a
 box in this file, with the evidence file it points at, before moving to the
 next one; do not mark a step done from a plan output alone.

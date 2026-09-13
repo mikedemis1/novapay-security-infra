@@ -23,7 +23,7 @@ per-service breakdown but charges 0.01 USD per API request, so it was not used;
 the inventory below answers the same question at no cost.
 
 
-2. Inventory of every account — what could be billing
+2. Inventory of every account, what could be billing
 ------------------------------------------------------------------------------
 Management 771665904432, Security 547090165470, Workloads 277606037083.
 The two members reached via OrganizationAccountAccessRole.
@@ -37,7 +37,7 @@ Secrets Manager              none       none        none
 
 The usual suspects for a surprise bill are all absent. An unattached Elastic IP
 alone would be about 3.60 USD a month and would have explained the figure
-exactly — there are none.
+exactly. There are none.
 
 S3, via CloudWatch BucketSizeBytes (free; Cost Explorer not needed):
 
@@ -49,7 +49,7 @@ S3, via CloudWatch BucketSizeBytes (free; Cost Explorer not needed):
 78 MB of standard storage is roughly 0.002 USD a month. Not the answer either.
 
 KMS in management returns two AWS-managed keys (free) and one id that
-describe-key rejects as invalid — the CloudTrail CMK scheduled for deletion on
+describe-key rejects as invalid, the CloudTrail CMK scheduled for deletion on
 2026-09-11. Nothing customer-managed is billing.
 
 
@@ -62,8 +62,8 @@ month-to-date across the whole month, which overstates the total whenever spend
 stops mid-month, as it did here.
 
 Steady-state cost from 2026-09-13 is cents: S3 storage plus CloudTrail request
-volume. That is what makes a 1 USD alarm meaningful rather than noise, and it is
-why the threshold was chosen after this audit rather than before it.
+volume. That is what makes a 1 USD alarm meaningful instead of noise, and it is
+why the threshold was chosen after this audit and not before it.
 
 Two orphan buckets were found and left alone deliberately. Both are empty and
 cost nothing. `aws-cloudtrail-logs-771665904432-8f566a03` follows the naming
@@ -91,7 +91,7 @@ Plan: 0 to add, 1 to change, 0 to destroy.
 $ terraform apply budget.tfplan
 Apply complete! Resources: 0 added, 1 changed, 0 destroyed.
 
-Read back from AWS rather than trusted from the apply output:
+Read back from AWS, not trusted from the apply output:
 
 $ aws budgets describe-budget ... --query 'Budget.[BudgetLimit.Amount,CalculatedSpend.ActualSpend.Amount]'
 5.0     3.662
