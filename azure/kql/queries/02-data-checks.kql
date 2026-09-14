@@ -1,0 +1,19 @@
+// Run each block separately in the ADX query editor.
+
+// Must return Rows = 14, InvalidTime = 0, InvalidMfa = 0.
+SecurityEventsV1
+| summarize Rows=count(), InvalidTime=countif(isnull(EventTime)), InvalidMfa=countif(isnull(MfaUsed))
+
+// Must return zero rows; prevents duplicated ingestion from faking a burst.
+SecurityEventsV1
+| summarize Copies=count() by EventId
+| where Copies != 1
+
+// Must return Count = 14 (the number of distinct event IDs).
+SecurityEventsV1
+| distinct EventId
+| count
+
+// Must match the 14 input rows, including values, not just the count.
+SecurityEventsV1
+| order by EventId asc
