@@ -1,0 +1,126 @@
+Budget alert investigation
+Date: 2026-09-14
+Trigger: AWS Budgets email, 07:35, "forecasted cost 7.09 USD exceeds 5.00 USD"
+
+The FORECASTED > 5 alert added on 2026-09-13 fired for the first time the next
+morning. This is that alert being answered rather than dismissed. Short version:
+the forecast is wrong, the account is not spending, and nothing needs changing.
+
+Everything below comes from AWS Budgets and CloudWatch billing metrics, both
+free. Cost Explorer charges 0.01 USD per request and was not used, same as on
+2026-09-13.
+
+
+1. What the alert said, and what the budget actually holds
+------------------------------------------------------------------------------
+$ aws budgets describe-budgets --account-id 771665904432
+
+  BudgetLimit          5.0 USD
+  ActualSpend          3.671
+  ForecastedSpend      7.092
+  LastUpdatedTime      2026-09-14T07:35:19
+
+Matches the email. Worth recording because the summary at the top of the
+project's state file says the budget was "retuned from 40 USD to 1", which is
+not what was built. The 2026-09-13 change set the limit to 5 USD with an ACTUAL
+threshold at 1 and a FORECASTED threshold at 5. The live configuration is right
+and the one-line summary is wrong.
+
+
+2. Actual spend, day by day
+------------------------------------------------------------------------------
+CloudWatch AWS/Billing EstimatedCharges, Currency=USD, month to date:
+
+  2026-09-06   3.40
+  2026-09-07   3.43
+  2026-09-08   3.50
+  2026-09-09   3.56
+  2026-09-10   3.60
+  2026-09-11   3.63
+  2026-09-12   3.66
+  2026-09-13   3.66
+  2026-09-14   3.67
+
+Eight days, 0.27 USD. The last three days total 0.01 USD.
+
+
+3. Where the 3.67 came from
+------------------------------------------------------------------------------
+Month to date per service, 6 September against 14 September:
+
+  service              06 Sep   14 Sep    delta
+  awswaf                 2.07     2.00    -0.07
+  awskms                 0.46     0.67    +0.21
+  AWSCloudTrail          0.52     0.54    +0.02
+  AmazonS3               0.15     0.22    +0.07
+  AWSCostExplorer        0.11     0.14    +0.03
+  AWSSecretsManager      0.09     0.10    +0.01
+  EC2, VPC, GuardDuty,
+  SecurityHub, EKS,
+  CloudWatch, SNS,
+  DataTransfer, Glue      0.00     0.00     0.00
+
+WAF is the largest single line at 2.00 USD, and it is flat. It was earned before
+the 6 September wind-down. This is worth calling out: the 2026-09-13 cost audit
+inventoried Elastic IPs, NAT gateways, EC2, KMS and Secrets Manager and found
+none of them, but it never looked at WAF, which turned out to be the biggest
+item on the bill. Checked today across both scopes and four regions in the
+management account and two in workloads:
+
+  wafv2 list-web-acls REGIONAL     0 in every region checked
+  wafv2 list-web-acls CLOUDFRONT   0
+
+None exist. The charge is historical, not a running resource.
+
+
+4. The only thing still accruing
+------------------------------------------------------------------------------
+Daily month-to-date, 8 to 14 September:
+
+  awskms            0.54 0.60 0.63 0.66 0.67 0.67 0.67
+  awswaf            2.00 2.00 2.00 2.00 2.00 2.00 2.00
+  AmazonS3          0.17 0.18 0.19 0.20 0.21 0.21 0.22
+  AWSCostExplorer   0.14 0.14 0.14 0.14 0.14 0.14 0.14
+
+KMS stopped on 12 September and has not moved since. That is the CloudTrail
+customer-managed key removal of 11 September showing up in the bill, two days
+later, which is the normal lag. Confirmed against the live account:
+
+  $ aws kms list-keys --query 'length(Keys)'
+  0
+
+Cost Explorer has been flat since 8 September, so nothing has been calling that
+API. The 0.14 is historical too.
+
+S3 is the only service still costing anything: 0.05 USD over six days, about
+0.008 a day. That is the CloudTrail log bucket, and it is the steady state.
+
+
+5. Why the forecast says 7.09
+------------------------------------------------------------------------------
+AWS extrapolates from month-to-date. Two thirds of this month's 3.67 was spent
+in the first six days, on resources that no longer exist. Extrapolating a
+front-loaded month over the remaining days produces a number that has nothing
+to do with the current run rate.
+
+At 0.008 USD a day, the sixteen days left in September add about 0.13, so the
+month ends near 3.80, not 7.09. October starts from zero and, at this run rate,
+finishes around 0.25.
+
+
+6. Conclusion
+------------------------------------------------------------------------------
+No action. Nothing is running that should not be. The alert did its job: it
+fired, the account was checked against real numbers, and the answer is that the
+spend is historical.
+
+One thing to expect rather than be surprised by: a FORECASTED threshold on an
+account this cheap is sensitive to exactly this kind of front-loading, so it can
+fire again after any month with a burst of activity early on. The ACTUAL
+threshold at 1 USD is the one that means money has genuinely been spent. During
+the AWS trial window of 10 to 16 October, expect both to fire and read the
+ACTUAL one.
+
+Also noted for the next person: the SCP guardrail is live and visible from here.
+An eks:ListClusters call into the workloads account came back denied by
+p-pyxqnvs4, which is the cost guardrail added on 2026-09-13 doing its job.
