@@ -1,0 +1,3 @@
+// Run once against the NovaPaySecurityLab database (or NovaPaySecurityLabV2 if
+// SecurityEventsV1 already holds unrelated data). Run this command by itself.
+.create table SecurityEventsV1 (EventId:string, EventTime:datetime, Actor:string, SourceIp:string, EventName:string, Outcome:string, MfaUsed:bool)
