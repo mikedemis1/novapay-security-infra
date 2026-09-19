@@ -26,10 +26,9 @@ $ aws iam get-account-summary --query 'SummaryMap.AccountMFAEnabled'   # workloa
 A device called novapay-workloads-root was sitting in management, and workloads
 was still at zero.
 
-Cause: the password reset was started from the management root address, which is
-management's root address, not the Workloads root address. The
-sign-in after it landed in management. Both consoles look identical except for
-the account number top right.
+Cause: the password reset was started from the management root address, not the
+Workloads one. The sign-in after it landed in management. Both consoles look
+identical except for the account number top right.
 
 Caught it because the device was named after the account it was meant to
 protect, so the ARN and the name disagreed. Would not have caught it from the
