@@ -6,7 +6,7 @@ NovaPay is a cloud-security lab for a fictional payments company. I built a thre
 
 The workload is a placeholder nginx service, not a payment application. Resources were deployed to real AWS accounts and billable test resources were later torn down. The evidence records what ran, what failed and what was never deployed; this README does not claim production readiness or DORA compliance.
 
-[Architecture](#architecture) ? [Evidence and results](#key-findings--results) ? [Lessons](#what-i-learned) ? [Reproduce](#how-to-deploy--reproduce)
+[Architecture](#architecture) · [Evidence and results](#key-findings--results) · [Lessons](#what-i-learned) · [Reproduce](#how-to-deploy--reproduce)
 
 ## Architecture
 
