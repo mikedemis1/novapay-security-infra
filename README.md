@@ -1,16 +1,183 @@
 # NovaPay secure platform
 
-A multi-account AWS landing zone and a hardened Kubernetes workload, written in Terraform, with a compliance pipeline that blocks non-conforming infrastructure before it is applied.
+## Overview
 
-NovaPay is an invented EU payments company. The regulatory framing is real: under DORA a compliance claim has to correspond to something that runs. That constraint drove the design, and it is also why this README separates what is running from what is only written down.
+NovaPay is a cloud-security lab for a fictional payments company. I built a three-account AWS environment in Terraform, tested security controls around a Kubernetes workload, and added a pull-request pipeline for infrastructure checks.
 
-This is a lab built to learn on, applied against real AWS accounts and torn down between tests to stay inside a 40 EUR monthly budget. It is not production, and the limits section says exactly where it falls short.
+The workload is a placeholder nginx service, not a payment application. Resources were deployed to real AWS accounts and billable test resources were later torn down. The evidence records what ran, what failed and what was never deployed; this README does not claim production readiness or DORA compliance.
 
-## What is actually running
+[Architecture](#architecture) ? [Evidence and results](#key-findings--results) ? [Lessons](#what-i-learned) ? [Reproduce](#how-to-deploy--reproduce)
+
+## Architecture
+
+The account boundary separates organization administration from workloads. The diagram shows the implemented layout and the historical EKS test environment. Status labels refer to the dated evidence, not a fresh AWS inventory.
+
+```mermaid
+flowchart TB
+    subgraph MGMT["Management account"]
+        ORG["Organizations and SCPs"]
+        TRAIL["Organization CloudTrail: SSE-S3"]
+        LOGS["S3 audit logs"]
+        STATE["S3 Terraform state"]
+    end
+    subgraph SEC["Security account"]
+        BASE["Account baseline and region restrictions"]
+    end
+    subgraph WORK["Workloads account"]
+        VPC["VPC: public, app and data subnets"]
+        EKS["EKS: tested, then destroyed"]
+        POD["nginx placeholder: Kyverno, PSS and NetworkPolicy"]
+        SECRET["Scoped secret access via IRSA: tested, then wound down"]
+    end
+    ORG -->|member-account guardrails| BASE
+    ORG -->|member-account guardrails| VPC
+    VPC -->|hosts test cluster| EKS
+    EKS --> POD
+    POD -->|scoped IAM role| SECRET
+    WORK -->|account API events| TRAIL
+    SEC -->|account API events| TRAIL
+    TRAIL -->|log delivery| LOGS
+```
+
+SCPs do not restrict the management account. GuardDuty and Security Hub ran there before being wound down on 6 September 2026; their planned migration to the Security account was never applied. The [detailed control inventory](#recorded-control-status) distinguishes deployed, destroyed and code-only controls.
+
+## Technologies Used
+
+| Technology | Role in this project |
+|---|---|
+| AWS Organizations, SCPs and IAM | Account separation, organization guardrails and workload permissions |
+| Terraform | Separate platform and workload stacks |
+| CloudTrail and S3 | Organization audit trail, log storage and remote Terraform state |
+| EKS, IRSA, Kyverno and Kubernetes NetworkPolicy | Tested workload identity, admission and network restrictions |
+| GitHub Actions, Checkov, Gitleaks and Conftest/OPA | Infrastructure checks and custom Rego policies on pull requests |
+| Trivy | Advisory configuration scanning and a recorded container image scan |
+
+## What This Project Demonstrates
+
+| Capability | Evidence |
+|---|---|
+| Verify organization guardrails from member accounts | [Allowed and denied region calls after applying SCPs](evidence/2026-09-11-scps-and-account-baseline.txt) |
+| Test Kubernetes controls with deliberate violations | [Admission rejections, scoped secret access and the NetworkPolicy correction](evidence/2026-08-09-cluster-control-tests.md) |
+| Run infrastructure checks without AWS credentials | [Recorded GitHub check results](evidence/2026-09-06-pipeline-first-github-run.txt) and [workflow](.github/workflows/compliance.yml) |
+| Verify resource state after teardown | [Post-wind-down AWS read-back](evidence/2026-09-06-post-winddown.txt) and [later billing investigation](evidence/2026-09-14-budget-alert-investigation.txt) |
+
+## How to Deploy / Reproduce
+
+Start with the credential-free checks from the repository root. These commands do not deploy resources. They require Terraform 1.10.5 and Conftest 0.56.0, matching the [workflow](.github/workflows/compliance.yml), plus network access to download Terraform providers and modules.
+
+```bash
+terraform fmt -check -recursive
+terraform -chdir=infra init -backend=false -input=false
+terraform -chdir=infra validate
+terraform -chdir=infra/workload init -backend=false -input=false
+terraform -chdir=infra/workload validate
+conftest test --parser hcl2 --policy policy --all-namespaces policy/fixtures/violations.tf.fixture
+```
+
+The final command deliberately uses invalid input and should exit non-zero. The workflow expects 13 policy denials; this is a policy self-test, not a deployment failure. The [policy guide](policy/README.md) explains the checks and their limits.
+
+AWS deployment is state-dependent and creates billable resources. Do not run an untargeted platform `terraform apply`: code for intentionally destroyed resources remains in the stack. Prepare `infra/backend.hcl` from [the example](infra/backend.hcl.example) and `infra/terraform.tfvars` from [its example](infra/terraform.tfvars.example), then use the state checks and targeted plans in [NEXT-STEPS](docs/NEXT-STEPS.md).
+
+The platform and workload are separate stacks. The [detection migration runbook](docs/runbooks/move-detection-to-security-account.md) explains the unresolved account move. The [cluster test-day record](docs/runbooks/cluster-test-day.md) documents tests and the incomplete bootstrap sequence; it is not a verified one-command deployment guide. Read its final note before provisioning. Use the [wind-down runbook](docs/runbooks/wind-down-billable-resources.md) for teardown and preserve evidence first.
+
+## Key Findings / Results
+
+### An AWS region restriction rejected the test call
+
+Excerpt from the [11 September 2026 read-back](evidence/2026-09-11-scps-and-account-baseline.txt), with the account-specific ARN omitted. This is historical terminal output, not a new execution.
+
+```text
+$ aws ec2 describe-vpcs --region eu-central-1
+  UnauthorizedOperation: ... is not authorized to perform: ec2:DescribeVpcs
+  with an explicit deny in a service control policy:
+```
+
+The same operation was allowed in `eu-west-1` in Workloads. The denied call was also tested in the Security account. Security-service tamper protection was verified by attachment only, not by attempting to stop logging.
+
+### The pipeline ran on GitHub
+
+[GitHub API capture for commit 794f1b6, 6 September 2026](evidence/2026-09-06-pipeline-first-github-run.txt):
+
+```text
+name        : format and validate
+status      : completed
+conclusion  : success
+
+name        : scanners and policy
+status      : completed
+conclusion  : success
+```
+
+The current [workflow](.github/workflows/compliance.yml) gates Checkov, Gitleaks and Conftest outcomes. Trivy configuration results are advisory. The green capture proves that dated run completed; it does not prove the live AWS estate matches the source.
+
+### Four cluster controls blocked immediately; one needed a fix
+
+The [9 August 2026 test record](evidence/2026-08-09-cluster-control-tests.md) records rejected privileged pods, rejected unapproved images, rejected missing resource limits and scoped IRSA access. NetworkPolicy initially allowed outbound HTTPS. After enabling enforcement in the VPC CNI, DNS still resolved and HTTPS timed out. This source is a written test record, not a raw terminal transcript.
+
+The [image scan](evidence/2026-08-09-trivy-nginx-unprivileged.txt) also recorded 105 findings, including two critical findings, in the placeholder image. These were accepted for the lab at that time, not reported as fixed.
+
+### The audit trail was retained after teardown
+
+The [6 September 2026 read-back](evidence/2026-09-06-post-winddown.txt) recorded an empty WAF WebACL list and `IsLogging: true` for the organization trail. The [14 September billing investigation](evidence/2026-09-14-budget-alert-investigation.txt) recorded month-to-date spend of USD 3.40 on 6 September and USD 3.67 on 14 September. These are historical readings, not today's running cost.
+
+[Browse all evidence](evidence/README.md).
+
+## What I Learned
+
+The most useful part of this repository. Each of these was found by testing something, not by reading about it.
+
+**Network policies were silently doing nothing.** The default-deny and DNS-only egress policies existed in the cluster and were accepted by the API. An HTTPS request from a pod that should have been blocked succeeded. The VPC CNI does not enforce NetworkPolicy objects unless `enableNetworkPolicy` is set on the add-on. Everything else tested that day worked from the start; this one looked identical to working. I enabled enforcement in the VPC CNI and repeated the test: DNS still worked and HTTPS timed out. I now test the action a control is meant to deny, as well as checking its configuration.
+
+**A fix that was recorded as done and never took effect.** The decision log said the trail had been moved from SSE-S3 to a customer-managed key in August. Only the bucket default had changed. CloudTrail sets the encryption on its own PutObject call, and the per-object choice beats the bucket default, so every log written for the next month was still SSE-S3. One `head-object` would have caught it at the time. The baseline capture in `evidence/` is that check, run a month late. Resolved after verification on 2026-09-11. The `UpdateKeyDescription`/`PutKeyPolicy` apply-order bug below could have been chased until the CMK took effect. The key was scheduled for deletion instead, since it was costing roughly 1-2 USD a month for a control that had never once run. The trail keeps SSE-S3, which is what it was always actually doing.
+
+**Deleting the branches did not delete the leaked commits.** Two branches containing real account root emails were squash-merged and deleted before the repository was made public, and that was recorded as closing the exposure. GitHub keeps unreachable commits fetchable by SHA, and publishes those SHAs through its own events API. The commits were still being served. The reasoning failed because a claim about an external system was accepted without testing it against that system.
+
+**A policy rule that passed an open SSH port.** The rule looked correct and returned no findings against a security group allowing port 22 from anywhere. The HCL parser represents a single `ingress` block as an object and several as a list, so iterating the object walked field values instead of rules. It would have started working by accident the day someone added a second block. The fixture that catches this now exists because of it.
+
+**The repository could not be planned.** `terraform plan` failed on a clean checkout whenever the cluster was down, which is most of the time. Kubernetes manifests validate against the live cluster's schema during plan, and the provider is configured from an endpoint that does not exist yet. No amount of `depends_on` helps, because it fails before apply. The cluster is now a separate stack, which is what the two things were in practice all along.
+
+**A threat model that marked absent controls as live.** The B2 table claimed five enforced guardrails. Read back from the organisation instead of the code, one was accurate, two covered a narrower scope than claimed, and two described policy that had never been applied at all, including the region deny. The Security account turned out to carry no service control policy whatsoever. Worst of the five: `ARCHITECTURE.md` argues that narrowing a trail is the failure that matters, because an updated trail still looks healthy, and the policy answering it denies `StopLogging` and `DeleteTrail` while saying nothing about `UpdateTrail`. Nothing in the pipeline could have caught this. Checkov and Conftest read the Terraform that was written, and the written policy was correct; it was never applied, and no scanner in this repository reads an organisation. Closed 2026-09-11: the three policies are applied, the Security unit now carries two, and the `UpdateTrail` hole is closed by `protect_security_services`, which denies it alongside `StopLogging`, `DeleteTrail` and `PutEventSelectors`. The lesson that produced this entry is why the evidence file for that apply reads every control back out of AWS, and tests the region deny from inside the member accounts instead of trusting that an attached policy denies anything.
+
+**A cluster version that was already out of support.** The first guess, 1.30, was past both standard and extended support on the day it was chosen. `aws eks describe-cluster-versions` is the answer; memory is not.
+
+**A KMS key policy that could not delete its own alias**, and an apply that failed because the provider calls `UpdateKeyDescription` before `PutKeyPolicy` within a single run.
+
+## What I'd Improve
+
+The limits above say what is missing. This says which of it I would fix first
+and why.
+
+- **VPC flow logs.** Nothing here records which address talked to which, and
+  delivering them means widening the bucket policy that protects the audit
+  trail, so it needs a deliberate change, not a default. This is the largest
+  gap in what the estate could reconstruct after an incident.
+- **The CloudTrail, GuardDuty, Security Hub and Config denies are attached but
+  never tamper-tested.** The region deny was proven by making the denied call
+  and reading the refusal. The other four share the same mechanism but were
+  never tested that way, because testing a deny on `StopLogging` means
+  actually calling it against the one detective control still running. That
+  is weaker evidence than the region row has, and I would rather prove it on
+  a disposable trail than keep assuming the mechanism transfers.
+- **The state bucket is encrypted with SSE-S3, not a customer-managed key.**
+  Terraform state holds a generated database password in clear text, so this
+  is a real weakness. It is deferred because a CMK on a state bucket is the
+  one encryption change that can lock you out of your own state, and doing it
+  safely needs a runbook: create the key, grant access, prove a read, then
+  switch the bucket default.
+- **No tested restore.** State is versioned and there is no data tier yet, so
+  nothing has actually been restored. A DORA-adjacent claim about resilience
+  is not worth much until something has been broken and brought back.
+
+## Detailed Reference
+
+### Recorded control status
+
+<details>
+<summary>Full control inventory and deployment history</summary>
 
 Three kinds of row, because they are three different claims.
 
-- **`live`** means it exists in AWS right now.
+- **`live`** means it was present at the cited verification date; it is not a current inventory.
 - **`written`** means the Terraform is in this repository and passes `validate`,
   `fmt` and the policy suite, but no `apply` ever put it into an account.
 - **`wound down`** means it was applied, it ran, it was verified, and it was
@@ -63,20 +230,27 @@ member accounts, with the denying policy id in the error. What is still written
 and never applied is the detection move itself and the IAM role that replaces
 the old test user's long-lived key.
 
-What is left running costs about 1.30 USD a month and is almost entirely free
-tier: the organisation and its accounts, the service control policies, the
-account baseline, Identity Center, the VPC, the state bucket, and the
-organisation CloudTrail. The trail stayed on purpose. It carries
-`prevent_destroy`, and a control you have deliberately guarded is not one to
-switch off to save a euro. Its customer-managed key did not stay, because it
-was never encrypting anything; that is the 2026-09-11 row above. Service
-control policies, password policies, the public access block, EBS encryption by
-default and an external-access Access Analyzer are all free, so the 2026-09-11
-applies did not move this figure.
+The cost figures changed after the September teardown and key removal. Use the dated billing readings in [the budget investigation](evidence/2026-09-14-budget-alert-investigation.txt); no current monthly cost is asserted here.
 
-## Architecture
+</details>
 
-Three accounts, because the account is AWS's only hard security boundary. The management account owns the organisation and nothing else worth stealing. The Security account administers detection and receives the alerts. Workloads holds everything that runs.
+### Limits
+
+Stated plainly, because a lab that claims to be more than it is fails the first real question.
+
+- **DORA compliance is not claimed.** This evidences a subset of the technical controls in Articles 9 and 10. Compliance is organisational and a solo project cannot reach it.
+- **No tested restore.** State is versioned in S3 and there is no data tier yet. Article 12 wants restore procedures exercised periodically; nothing here has been restored, so nothing is claimed.
+- **No continuous verification at all, since the wind-down.** Security Hub ran with no standards behind it, so it aggregated GuardDuty and little else, and both are now gone. Checking that the landing zone still matches CIS was already manual; it is now the only option. A manual review is what found the CloudTrail problem above, which is the argument for and against this in one sentence.
+- **The transaction service is a placeholder.** It is nginx. The interesting object is the set of controls around it, not the workload.
+- **The web ACL never blocked anything.** Its rules were in count mode and it was attached to nothing for its entire life, at 7.75 USD a month. It is the clearest thing in this repository about the difference between a control that exists and a control that works.
+- **The log bucket lives in the management account**, not a dedicated log archive account. That is a deliberate simplification of the AWS reference architecture at this scale, and it means the logs sit in the one account service control policies cannot govern.
+- **No VPC flow logs.** Nothing here records which address talked to which. Delivering them means a cross-account write into the management-account log bucket, which means widening the bucket policy that protects the audit trail, and that is a judgement call, not an attribute. It is the largest single gap in what this estate can reconstruct after an incident.
+- **The state bucket is encrypted with SSE-S3, not a customer-managed key.** State holds a generated database password in clear text, so this is a real weakness and not a stylistic one. It is deferred because a CMK on the state bucket is the one encryption change that can lock you out of your own state, and doing it safely is a runbook: create the key, grant access, prove a read, then switch the bucket default.
+
+<details>
+<summary>Original target architecture, including the unapplied detection migration</summary>
+
+This was the intended design, including detection in the Security account. That migration was never applied.
 
 ```mermaid
 flowchart TB
@@ -109,31 +283,16 @@ flowchart TB
     EKS -->|IRSA role, scoped to one secret| SM
 ```
 
-Service control policies do not apply to the management account. That is the single most important thing to understand about this diagram, and it is why detection and alerting live in the Security account, not next to the organisation.
+Service control policies do not apply to the management account. That is the single most important thing to understand about this diagram, and it explains the intended placement of detection in the Security account.
 
 The diagram is the design as this repository defines it, not a picture of AWS today. The detection block sits in the Security account here; it was never moved there, it ran from the management account for its whole life, and on 2026-09-06 it was wound down. The Security account still exists and still receives no detection, because there is none left to receive.
 
-## What broke
+</details>
 
-The most useful part of this repository. Each of these was found by testing something, not by reading about it.
+<details>
+<summary>Historical costs and teardown lessons</summary>
 
-**Network policies were silently doing nothing.** The default-deny and DNS-only egress policies existed in the cluster and were accepted by the API. An HTTPS request from a pod that should have been blocked succeeded. The VPC CNI does not enforce NetworkPolicy objects unless `enableNetworkPolicy` is set on the add-on. Everything else tested that day worked from the start; this one looked identical to working.
-
-**A fix that was recorded as done and never took effect.** The decision log said the trail had been moved from SSE-S3 to a customer-managed key in August. Only the bucket default had changed. CloudTrail sets the encryption on its own PutObject call, and the per-object choice beats the bucket default, so every log written for the next month was still SSE-S3. One `head-object` would have caught it at the time. The baseline capture in `evidence/` is that check, run a month late. Resolved 2026-09-11 by a five-agent review. The `UpdateKeyDescription`/`PutKeyPolicy` apply-order bug below could have been chased until the CMK took effect. The key was scheduled for deletion instead, since it was costing roughly 1-2 USD a month for a control that had never once run. The trail keeps SSE-S3, which is what it was always actually doing.
-
-**Deleting the branches did not delete the leaked commits.** Two branches containing real account root emails were squash-merged and deleted before the repository was made public, and that was recorded as closing the exposure. GitHub keeps unreachable commits fetchable by SHA, and publishes those SHAs through its own events API. The commits were still being served. The reasoning failed because a claim about an external system was accepted without testing it against that system.
-
-**A policy rule that passed an open SSH port.** The rule looked correct and returned no findings against a security group allowing port 22 from anywhere. The HCL parser represents a single `ingress` block as an object and several as a list, so iterating the object walked field values instead of rules. It would have started working by accident the day someone added a second block. The fixture that catches this now exists because of it.
-
-**The repository could not be planned.** `terraform plan` failed on a clean checkout whenever the cluster was down, which is most of the time. Kubernetes manifests validate against the live cluster's schema during plan, and the provider is configured from an endpoint that does not exist yet. No amount of `depends_on` helps, because it fails before apply. The cluster is now a separate stack, which is what the two things were in practice all along.
-
-**A threat model that marked absent controls as live.** The B2 table claimed five enforced guardrails. Read back from the organisation instead of the code, one was accurate, two covered a narrower scope than claimed, and two described policy that had never been applied at all, including the region deny. The Security account turned out to carry no service control policy whatsoever. Worst of the five: `ARCHITECTURE.md` argues that narrowing a trail is the failure that matters, because an updated trail still looks healthy, and the policy answering it denies `StopLogging` and `DeleteTrail` while saying nothing about `UpdateTrail`. Nothing in the pipeline could have caught this. Checkov and Conftest read the Terraform that was written, and the written policy was correct; it was never applied, and no scanner in this repository reads an organisation. Closed 2026-09-11: the three policies are applied, the Security unit now carries two, and the `UpdateTrail` hole is closed by `protect_security_services`, which denies it alongside `StopLogging`, `DeleteTrail` and `PutEventSelectors`. The lesson that produced this entry is why the evidence file for that apply reads every control back out of AWS, and tests the region deny from inside the member accounts instead of trusting that an attached policy denies anything.
-
-**A cluster version that was already out of support.** The first guess, 1.30, was past both standard and extended support on the day it was chosen. `aws eks describe-cluster-versions` is the answer; memory is not.
-
-**A KMS key policy that could not delete its own alias**, and an apply that failed because the provider calls `UpdateKeyDescription` before `PutKeyPolicy` within a single run.
-
-## Cost
+### Cost
 
 August, excluding tax:
 
@@ -143,13 +302,13 @@ August, excluding tax:
 | Everything else | 5.87 |
 | Total | 14.76 |
 
-The web ACL was 60 percent of the bill while protecting nothing, because there is no load balancer to attach it to. It was moved into the workload stack in code, so that it would come up and go down with the thing it fronts, and the applied one was destroyed in the wind-down below. The EKS control plane bills roughly 0.10 USD per hour whenever the cluster exists, which is why the cluster is a same-day resource.
+The web ACL was 60 percent of the bill while protecting nothing, because there is no load balancer to attach it to. It was moved into the workload stack in code, so that it would come up and go down with the thing it fronts, and the applied one was destroyed in the wind-down below. The cluster was treated as a same-day resource because the control plane and supporting resources incur charges while provisioned. Check current pricing before recreating it.
 
-After the wind-down the estate bills about **1.30 USD a month**: one customer-managed key for the log bucket, and storage for that bucket and the state bucket. Everything else still running is free tier. That figure only appears a week after the teardown, because the key destroyed on 2026-09-06 was scheduled for deletion with a seven-day window and bills for the whole of it.
+The earlier USD 1.30 monthly estimate included a log-bucket key that was subsequently scheduled for deletion. The [14 September investigation](evidence/2026-09-14-budget-alert-investigation.txt) supersedes that estimate with dated billing readings.
 
 A two-threshold budget alarm was created before any billable resource, and it is still running.
 
-## Winding it down
+### Winding it down
 
 Done on 2026-09-06, and the interesting part is what was kept.
 
@@ -167,78 +326,15 @@ Most of this landing zone is free: the organisation, the accounts and units, the
 
 Two things billed for a week after Terraform reported them gone: both the key and the secret carry a seven-day window and are scheduled, not deleted.
 
-## Running it
+</details>
 
-Two stacks, in order. The platform is long-lived; the workload is created for a test and destroyed after.
-
-```
-cd infra
-terraform init -backend-config=backend.hcl
-terraform apply
-
-cd workload
-terraform init -backend-config=../backend.hcl
-terraform apply -var platform_state_bucket=<bucket> -var 'operator_cidrs=["<your ip>/32"]'
-```
-
-`infra/backend.hcl` holds the state bucket name and is not committed; see `infra/backend.hcl.example`. Copy `infra/terraform.tfvars.example` to `infra/terraform.tfvars` and fill in the email addresses and the security contact number.
-
-Tear the workload down the same day:
-
-```
-terraform destroy
-```
-
-If you are applying the platform stack for the first time since the detection services moved accounts, read `docs/runbooks/move-detection-to-security-account.md` first. That change cannot be applied in one step, because moving a resource between accounts in Terraform is a destroy and a create, not an edit.
-
-State here was last written by the code from before that move, so `terraform plan` against `main` fails on a refresh it is not allowed to perform. That is expected, and both runbooks start by checking out the `pre-detection-move` tag, which is the commit whose addresses still match what is in state.
-
-## The compliance pipeline
+### The compliance pipeline
 
 Every pull request runs `terraform fmt` and `validate` on both stacks, then Checkov, Trivy, gitleaks and seven Conftest policies, uploads SARIF to code scanning and writes a summary table. Nothing in it needs AWS credentials.
 
 Each policy names the DORA article it evidences. `policy/README.md` lists them, and lists the four articles this project deliberately does not claim, including backup and restore, which requires a tested restore that has never been run here.
 
-## Limits
-
-Stated plainly, because a lab that claims to be more than it is fails the first real question.
-
-- **DORA compliance is not claimed.** This evidences a subset of the technical controls in Articles 9 and 10. Compliance is organisational and a solo project cannot reach it.
-- **No tested restore.** State is versioned in S3 and there is no data tier yet. Article 12 wants restore procedures exercised periodically; nothing here has been restored, so nothing is claimed.
-- **No continuous verification at all, since the wind-down.** Security Hub ran with no standards behind it, so it aggregated GuardDuty and little else, and both are now gone. Checking that the landing zone still matches CIS was already manual; it is now the only option. A manual review is what found the CloudTrail problem above, which is the argument for and against this in one sentence.
-- **The transaction service is a placeholder.** It is nginx. The interesting object is the set of controls around it, not the workload.
-- **The web ACL never blocked anything.** Its rules were in count mode and it was attached to nothing for its entire life, at 7.75 USD a month. It is the clearest thing in this repository about the difference between a control that exists and a control that works.
-- **The log bucket and its key live in the management account**, not a dedicated log archive account. That is a deliberate simplification of the AWS reference architecture at this scale, and it means the logs sit in the one account service control policies cannot govern.
-- **No VPC flow logs.** Nothing here records which address talked to which. Delivering them means a cross-account write into the management-account log bucket, which means widening the bucket policy that protects the audit trail, and that is a judgement call, not an attribute. It is the largest single gap in what this estate can reconstruct after an incident.
-- **The state bucket is encrypted with SSE-S3, not a customer-managed key.** State holds a generated database password in clear text, so this is a real weakness and not a stylistic one. It is deferred because a CMK on the state bucket is the one encryption change that can lock you out of your own state, and doing it safely is a runbook: create the key, grant access, prove a read, then switch the bucket default.
-
-## What I'd Improve
-
-The limits above say what is missing. This says which of it I would fix first
-and why.
-
-- **VPC flow logs.** Nothing here records which address talked to which, and
-  delivering them means widening the bucket policy that protects the audit
-  trail, so it needs a deliberate change, not a default. This is the largest
-  gap in what the estate could reconstruct after an incident.
-- **The CloudTrail, GuardDuty, Security Hub and Config denies are attached but
-  never tamper-tested.** The region deny was proven by making the denied call
-  and reading the refusal. The other four share the same mechanism but were
-  never tested that way, because testing a deny on `StopLogging` means
-  actually calling it against the one detective control still running. That
-  is weaker evidence than the region row has, and I would rather prove it on
-  a disposable trail than keep assuming the mechanism transfers.
-- **The state bucket is encrypted with SSE-S3, not a customer-managed key.**
-  Terraform state holds a generated database password in clear text, so this
-  is a real weakness. It is deferred because a CMK on a state bucket is the
-  one encryption change that can lock you out of your own state, and doing it
-  safely needs a runbook: create the key, grant access, prove a read, then
-  switch the bucket default.
-- **No tested restore.** State is versioned and there is no data tier yet, so
-  nothing has actually been restored. A DORA-adjacent claim about resilience
-  is not worth much until something has been broken and brought back.
-
-## Layout
+### Layout
 
 ```
 infra/              platform stack: organisation, accounts, logging, detection, network
