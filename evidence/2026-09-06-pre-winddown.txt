@@ -35,7 +35,7 @@ $ aws organizations list-accounts
             "Status": "ACTIVE",
             "State": "ACTIVE",
             "Paths": [
-                "<org-id>/r-f915/<management-account>/"
+                "<org-id>/<org-root>/<management-account>/"
             ],
             "JoinedMethod": "INVITED",
             "JoinedTimestamp": "2026-07-29T00:24:34.860000+03:00"
@@ -48,7 +48,7 @@ $ aws organizations list-accounts
             "Status": "ACTIVE",
             "State": "ACTIVE",
             "Paths": [
-                "<org-id>/r-f915/<ou-id>/<workloads-account>/"
+                "<org-id>/<org-root>/<ou-id>/<workloads-account>/"
             ],
             "JoinedMethod": "CREATED",
             "JoinedTimestamp": "2026-08-07T23:06:36.471000+03:00"
@@ -61,7 +61,7 @@ $ aws organizations list-accounts
             "Status": "ACTIVE",
             "State": "ACTIVE",
             "Paths": [
-                "<org-id>/r-f915/<ou-id>/<security-account>/"
+                "<org-id>/<org-root>/<ou-id>/<security-account>/"
             ],
             "JoinedMethod": "CREATED",
             "JoinedTimestamp": "2026-08-07T23:06:35.725000+03:00"
@@ -73,8 +73,8 @@ $ aws organizations list-roots
 {
     "Roots": [
         {
-            "Id": "r-f915",
-            "Arn": "arn:aws:organizations::<management-account>:root/<org-id>/r-f915",
+            "Id": "<org-root>",
+            "Arn": "arn:aws:organizations::<management-account>:root/<org-id>/<org-root>",
             "Name": "Root",
             "PolicyTypes": [
                 {

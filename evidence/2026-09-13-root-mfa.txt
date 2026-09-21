@@ -5,9 +5,9 @@ Root MFA, all three accounts
 BEFORE
 ------
                               AccountMFAEnabled   devices
-management   771665904432             1           Authapp, novapay-management-root
-security     547090165470             1           novapay-security-root
-workloads    277606037083             0           none
+management   <management-account>             1           Authapp, novapay-management-root
+security     <security-account>             1           novapay-security-root
+workloads    <workloads-account>             0           none
 
 Only workloads missing. Created by Organizations so root had no password;
 needed a reset first.
@@ -16,9 +16,9 @@ needed a reset first.
 FIRST ATTEMPT WENT TO THE WRONG ACCOUNT
 ---------------------------------------
 $ aws iam list-virtual-mfa-devices --assignment-status Assigned
-arn:aws:iam::771665904432:mfa/Authapp
-arn:aws:iam::771665904432:mfa/novapay-management-root
-arn:aws:iam::771665904432:mfa/novapay-workloads-root      <-- wrong account
+arn:aws:iam::<management-account>:mfa/Authapp
+arn:aws:iam::<management-account>:mfa/novapay-management-root
+arn:aws:iam::<management-account>:mfa/novapay-workloads-root      <-- wrong account
 
 $ aws iam get-account-summary --query 'SummaryMap.AccountMFAEnabled'   # workloads
 0
@@ -44,10 +44,10 @@ AFTER
 $ aws iam get-account-summary --query 'SummaryMap.AccountMFAEnabled'
 $ aws iam list-virtual-mfa-devices --assignment-status Assigned
 
-management   771665904432   1   mfa/Authapp                 2026-05-12
+management   <management-account>   1   mfa/Authapp                 2026-05-12
                                 mfa/novapay-management-root 2026-08-09
-security     547090165470   1   mfa/novapay-security-root
-workloads    277606037083   1   mfa/novapay-workloads-root  2026-09-13T14:41:09Z
+security     <security-account>   1   mfa/novapay-security-root
+workloads    <workloads-account>   1   mfa/novapay-workloads-root  2026-09-13T14:41:09Z
 
 management keeps 2 devices on purpose (AWS allows 8). Spare in case the phone
 dies.
@@ -66,6 +66,6 @@ Organizations-managed accounts in 35 days.
 Unassigned virtual MFA device 'mike' exists in management, attached to nothing.
 Left it alone.
 
-Still open: cli-admin has an active long-lived key and no MFA. Cannot remove it
+Still open: <cli-iam-user> has an active long-lived key and no MFA. Cannot remove it
 until Identity Center access works, since every CLI session here authenticates
-as cli-admin.
+as <cli-iam-user>.

@@ -51,13 +51,13 @@ $ aws organizations list-policies --filter SERVICE_CONTROL_POLICY
   novapay-workloads-guardrails       p-wgirycnf   <- the old one, see below
   FullAWSAccess                      p-FullAWSAccess (AWS managed)
 
-$ aws organizations list-policies-for-target --target-id r-f915              (root)
+$ aws organizations list-policies-for-target --target-id <org-root>              (root)
   FullAWSAccess, novapay-base-guardrails
 
-$ aws organizations list-policies-for-target --target-id ou-f915-bvzrbudp    (Security)
+$ aws organizations list-policies-for-target --target-id <security-ou>    (Security)
   FullAWSAccess, novapay-region-deny, novapay-protect-security-services
 
-$ aws organizations list-policies-for-target --target-id ou-f915-pkfqytr1    (Workloads)
+$ aws organizations list-policies-for-target --target-id <workloads-ou>    (Workloads)
   FullAWSAccess, novapay-region-deny, novapay-protect-security-services,
   novapay-workloads-guardrails
 
@@ -88,8 +88,8 @@ Tested by assuming OrganizationAccountAccessRole into each member account and
 making read-only calls. A policy that exists is not a policy that bites; this
 is the difference.
 
-Workloads (277606037083),
-arn:aws:sts::277606037083:assumed-role/OrganizationAccountAccessRole/scp-verification
+Workloads (<workloads-account>),
+arn:aws:sts::<workloads-account>:assumed-role/OrganizationAccountAccessRole/scp-verification
 
   $ aws ec2 describe-vpcs --region eu-west-1
     vpc-0f46e5d66fac2ea90  vpc-0c7512967a12869d5          <- allowed
@@ -97,7 +97,7 @@ arn:aws:sts::277606037083:assumed-role/OrganizationAccountAccessRole/scp-verific
   $ aws ec2 describe-vpcs --region eu-central-1
     UnauthorizedOperation: ... is not authorized to perform: ec2:DescribeVpcs
     with an explicit deny in a service control policy:
-    arn:aws:organizations::771665904432:policy/o-tcspyaifkn/service_control_policy/p-pyxqnvs4
+    arn:aws:organizations::<management-account>:policy/<organization-id>/service_control_policy/p-pyxqnvs4
 
   $ aws ec2 describe-instances --region eu-north-1
     UnauthorizedOperation: ... explicit deny in a service control policy:
@@ -107,7 +107,7 @@ arn:aws:sts::277606037083:assumed-role/OrganizationAccountAccessRole/scp-verific
     {"AccountAliases": []}                                 <- global service,
     still allowed, which is the NotAction list doing its job
 
-Security (547090165470)
+Security (<security-account>)
 
   $ aws ec2 describe-vpcs --region eu-central-1
     UnauthorizedOperation: ... explicit deny in a service control policy:
@@ -127,14 +127,14 @@ mistaken for a pass.
 
 --- Read back: the baseline, per account ---
 
-Management (771665904432), as user/cli-admin:
+Management (<management-account>), as user/<cli-iam-user>:
 
   $ aws iam get-account-password-policy
     MinimumPasswordLength 14, RequireSymbols true, RequireNumbers true,
     RequireUppercase true, RequireLowercase true, MaxPasswordAge 90,
     PasswordReusePrevention 24, AllowUsersToChangePassword true
 
-  $ aws s3control get-public-access-block --account-id 771665904432
+  $ aws s3control get-public-access-block --account-id <management-account>
     BlockPublicAcls, IgnorePublicAcls, BlockPublicPolicy,
     RestrictPublicBuckets: all true
 
@@ -149,7 +149,7 @@ Management (771665904432), as user/cli-admin:
     matters; the value does not.
 
   $ aws accessanalyzer list-analyzers --region eu-west-1
-    arn:aws:access-analyzer:eu-west-1:771665904432:analyzer/novapay-org-external-access
+    arn:aws:access-analyzer:eu-west-1:<management-account>:analyzer/novapay-org-external-access
     type ORGANIZATION, createdAt 2026-09-11T15:48:56+00:00, status CREATING
 
     Note: the same call with no --region returned an empty list, because this
@@ -158,7 +158,7 @@ Management (771665904432), as user/cli-admin:
     back in the wrong region is a good way to report a control missing that is
     not, or present that is not.
 
-Workloads (277606037083):
+Workloads (<workloads-account>):
 
   $ aws iam get-account-password-policy      14 / 24 / 90
   $ aws s3control get-public-access-block     all four true
@@ -173,7 +173,7 @@ account that runs EC2. The setting reads back true in the management account
 too, but nothing in this repository set it there, so that is not evidence of
 anything and is not counted as a control.
 
-Security (547090165470):
+Security (<security-account>):
 
   $ aws iam get-account-password-policy      14 / 24 / 90
   $ aws s3control get-public-access-block     all four true
@@ -208,8 +208,8 @@ Every address accounted for:
 The plan also ends with the SNS AuthorizationError that
 docs/runbooks/move-detection-to-security-account.md predicts in its own step 0:
 
-  Error: reading SNS Topic (arn:aws:sns:eu-west-1:771665904432:novapay-security-alerts):
-  403 AuthorizationError: User: arn:aws:sts::547090165470:assumed-role/OrganizationAccountAccessRole/...
+  Error: reading SNS Topic (arn:aws:sns:eu-west-1:<management-account>:novapay-security-alerts):
+  403 AuthorizationError: User: arn:aws:sts::<security-account>:assumed-role/OrganizationAccountAccessRole/...
   is not authorized to perform: SNS:GetTopicAttributes
 
 Expected, unchanged by this step, and the reason step 3 has a two-phase
@@ -218,7 +218,7 @@ destroy-then-apply shape. It is not a new failure introduced here.
 
 --- Noted while verifying, not fixed here ---
 
-These calls ran as arn:aws:iam::771665904432:user/cli-admin, an IAM user with a
+These calls ran as arn:aws:iam::<management-account>:user/<cli-iam-user>, an IAM user with a
 long-lived access key in the management account. NEXT-STEPS.md step 4 is to
 delete two such users. Whichever session does that must confirm what replaces
 this credential path before removing it, or it removes its own access.

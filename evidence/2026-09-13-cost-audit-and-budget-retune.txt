@@ -10,7 +10,7 @@ normal baseline, which is how alert fatigue starts.
 
 1. What the account actually spends
 ------------------------------------------------------------------------------
-$ aws budgets describe-budget --account-id 771665904432 \
+$ aws budgets describe-budget --account-id <management-account> \
     --budget-name novapay-monthly-budget \
     --query 'Budget.[BudgetLimit.Amount,CalculatedSpend.ActualSpend.Amount,CalculatedSpend.ForecastedSpend.Amount]'
 40.0    3.662    4.292
@@ -25,7 +25,7 @@ the inventory below answers the same question at no cost.
 
 2. Inventory of every account, what could be billing
 ------------------------------------------------------------------------------
-Management 771665904432, Security 547090165470, Workloads 277606037083.
+Management <management-account>, Security <security-account>, Workloads <workloads-account>.
 The two members reached via OrganizationAccountAccessRole.
 
                         management   security   workloads
@@ -41,9 +41,9 @@ exactly. There are none.
 
 S3, via CloudWatch BucketSizeBytes (free; Cost Explorer not needed):
 
-  novapay-cloudtrail-logs-771665904432        68,387,704 B   (~68 MB)
-  novapay-tfstate-771665904432                10,332,348 B   (~10 MB)
-  aws-cloudtrail-logs-771665904432-8f566a03   no datapoint   (empty)
+  novapay-cloudtrail-logs-<management-account>        68,387,704 B   (~68 MB)
+  novapay-tfstate-<management-account>                10,332,348 B   (~10 MB)
+  aws-cloudtrail-logs-<management-account>-8f566a03   no datapoint   (empty)
   mike-first-bucket-2026                      no datapoint   (empty)
 
 78 MB of standard storage is roughly 0.002 USD a month. Not the answer either.
@@ -66,7 +66,7 @@ volume. That is what makes a 1 USD alarm meaningful instead of noise, and it is
 why the threshold was chosen after this audit and not before it.
 
 Two orphan buckets were found and left alone deliberately. Both are empty and
-cost nothing. `aws-cloudtrail-logs-771665904432-8f566a03` follows the naming
+cost nothing. `aws-cloudtrail-logs-<management-account>-8f566a03` follows the naming
 pattern the AWS console generates when a trail is created by hand, so a trail
 was almost certainly created and later deleted without removing its bucket;
 `mike-first-bucket-2026` is unrelated to this project. Neither is Terraform

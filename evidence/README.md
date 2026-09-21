@@ -12,7 +12,7 @@ does not need cropping.
 |---|---|---|
 | `2026-09-14-budget-alert-investigation.txt` | The first firing of the FORECASTED budget alert, answered rather than dismissed. Day-by-day and per-service charges read from CloudWatch billing metrics. The forecast of 7.09 USD is an extrapolation of a month whose spend was front-loaded before the 6 September wind-down; the current run rate is 0.008 USD a day. Also records that the 2026-09-13 audit missed WAF, which turned out to be the largest single line on the bill, and confirms none exist now. | 2026-09-14 |
 | `2026-09-13-root-mfa.txt` | Root MFA turned on for all three accounts. The first attempt registered a device in the wrong account because the password reset used management's root email instead of workloads'; caught because the device name and the account it landed in disagreed. Read back after the fix: all three show `AccountMFAEnabled = 1`. | 2026-09-13 |
-| `2026-09-13-iam-key-hygiene.txt` | IAM access key audit in the management account. Deactivated a `mike-admin` key unused for two months, decided by last-used date rather than creation date. Access key IDs are truncated to four characters after the repository's own gitleaks gate correctly failed the first version of this file. Records what is still open: `cli-admin`'s active long-lived key and missing MFA, which cannot be removed until Identity Center access replaces it. | 2026-09-13 |
+| `2026-09-13-iam-key-hygiene.txt` | IAM access key audit in the management account. Deactivated a `<secondary-iam-user>` key unused for two months, decided by last-used date rather than creation date. Access key IDs are truncated to four characters after the repository's own gitleaks gate correctly failed the first version of this file. Records what is still open: `<cli-iam-user>`'s active long-lived key and missing MFA, which cannot be removed until Identity Center access replaces it. | 2026-09-13 |
 | `2026-09-13-cost-guardrail-scp.txt` | A fourth service control policy, `novapay-cost-guardrails`, applied and negative-tested. Argues a budget is a notification with a billing-data lag, not a brake, and an SCP refuses the API call at the moment it is made. | 2026-09-13 |
 | `2026-09-13-cost-audit-and-budget-retune.txt` | Real spend read from AWS Budgets before choosing an alarm threshold, rather than guessing one. Actual spend was higher than earlier notes assumed, which is why the retuned budget uses both an ACTUAL and a FORECASTED threshold instead of one. | 2026-09-13 |
 | `2026-09-11-scps-and-account-baseline.txt` | The three service control policies and the account baseline read back per account after the apply, not just planned. The region-deny policy tested from inside both member accounts, denying `ec2:DescribeVpcs` in `eu-central-1` with the denying policy id in the error. | 2026-09-11 |
@@ -47,4 +47,10 @@ identically would destroy the thing most of these commands exist to prove.
 three identical `<account-id>` strings are not.
 
 Before adding anything by hand: remove account identifiers, IAM user names and
-email addresses. The captures here have been through that already.
+email addresses. A follow-up review on 21 September 2026 found identifiers
+in several manually added captures; those text files have been corrected.
+Account roles, organisational units and distinct IAM users retain consistent
+placeholder labels.
+These edits redact identifiers only; they do not change test results or imply
+that the historical calls were rerun. Earlier Git revisions are not covered
+by this cleanup.
