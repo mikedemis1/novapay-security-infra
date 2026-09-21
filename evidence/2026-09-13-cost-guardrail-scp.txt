@@ -1,7 +1,7 @@
 Cost guardrail SCP, applied and negative-tested
 Date: 2026-09-13
 Policy: novapay-cost-guardrails, p-s9ly2gd2
-Attached to: Workloads (ou-f915-pkfqytr1) and Security (ou-f915-bvzrbudp)
+Attached to: Workloads (<workloads-ou>) and Security (<security-ou>)
 
 
 1. Why a policy and not a budget
@@ -47,23 +47,23 @@ detection work this repository exists to demonstrate.
 3. The negative test
 ------------------------------------------------------------------------------
 Applying a policy is not evidence that it works. Assumed
-OrganizationAccountAccessRole into Workloads 277606037083 and tried both
+OrganizationAccountAccessRole into Workloads <workloads-account> and tried both
 directions.
 
 DENIED, Elastic IP allocation:
 
 $ aws ec2 allocate-address --region eu-west-1 --dry-run
 An error occurred (UnauthorizedOperation) ... not authorized to perform:
-ec2:AllocateAddress on resource: arn:aws:ec2:eu-west-1:277606037083:elastic-ip/*
+ec2:AllocateAddress on resource: arn:aws:ec2:eu-west-1:<workloads-account>:elastic-ip/*
 with an explicit deny in a service control policy:
-arn:aws:organizations::771665904432:policy/o-tcspyaifkn/service_control_policy/p-s9ly2gd2
+arn:aws:organizations::<management-account>:policy/<organization-id>/service_control_policy/p-s9ly2gd2
 
 DENIED, customer-managed KMS key:
 
 $ aws kms create-key --region eu-west-1 --description "scp test"
 An error occurred (AccessDeniedException) ... not authorized to perform:
 kms:CreateKey on resource: * with an explicit deny in a service control policy:
-arn:aws:organizations::771665904432:policy/o-tcspyaifkn/service_control_policy/p-s9ly2gd2
+arn:aws:organizations::<management-account>:policy/<organization-id>/service_control_policy/p-s9ly2gd2
 
 Both name the policy by ARN, so the denial is provably this policy and not an
 IAM permission gap.
@@ -83,7 +83,7 @@ legitimate work gets detached, and a detached guardrail protects nothing.
 4. Limits, stated plainly
 ------------------------------------------------------------------------------
 - **SCPs never apply to the management account.** That is an AWS rule, not a
-  configuration choice. Management 771665904432 holds the organisation, the log
+  configuration choice. Management <management-account> holds the organisation, the log
   bucket and the Terraform state, and remains protected only by root MFA, its
   IAM configuration and the budget alert. Most billable resources live in
   Workloads, which is covered, but this is a real gap and not a small one.

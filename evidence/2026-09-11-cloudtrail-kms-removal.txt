@@ -20,7 +20,7 @@ Plan: 0 to add, 3 to change, 0 to destroy.
   # aws_s3_bucket.cloudtrail_logs will be updated in-place (tags_all drift only)
   # aws_s3_bucket_server_side_encryption_configuration.cloudtrail_logs will be
     updated in-place:
-      - kms_master_key_id = "arn:aws:kms:eu-west-1:771665904432:key/83146099-de2f-4351-b4e7-675165a648b2" -> null
+      - kms_master_key_id = "arn:aws:kms:eu-west-1:<management-account>:key/83146099-de2f-4351-b4e7-675165a648b2" -> null
       - sse_algorithm      = "aws:kms" -> null
       + sse_algorithm      = "AES256"
 
@@ -34,8 +34,8 @@ $ terraform apply <the plan above>
 Apply complete! Resources: 0 added, 3 changed, 0 destroyed.
 
 --- head-object on a live log object, after apply ---
-$ aws s3api head-object --bucket novapay-cloudtrail-logs-771665904432 \
-    --key AWSLogs/771665904432/CloudTrail/
+$ aws s3api head-object --bucket novapay-cloudtrail-logs-<management-account> \
+    --key AWSLogs/<management-account>/CloudTrail/
 {
     "ServerSideEncryption": "AES256",
     ...no SSEKMSKeyId field present...

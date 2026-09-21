@@ -1,4 +1,4 @@
-IAM access key hygiene, management account 771665904432
+IAM access key hygiene, management account <management-account>
 Date: 2026-09-13
 Context: docs/NEXT-STEPS.md step 4, first and lowest-risk action.
 
@@ -30,18 +30,18 @@ documented the wrong lesson.
 1. What existed
 ------------------------------------------------------------------------------
 $ aws iam list-users --query 'Users[].UserName' --output text
-cli-admin	mike-admin
+<cli-iam-user>	<secondary-iam-user>
 
-$ aws iam list-access-keys --user-name mike-admin \
+$ aws iam list-access-keys --user-name <secondary-iam-user> \
     --query 'AccessKeyMetadata[].[AccessKeyId,Status,CreateDate]' --output text
 AKIA...LRNZ	Active	2026-07-15T18:01:06+00:00
 AKIA...OWVN	Active	2026-05-15T16:39:56+00:00
 
-$ aws iam list-mfa-devices --user-name cli-admin  --query 'MFADevices[].SerialNumber' --output text
-(empty, cli-admin has no MFA)
+$ aws iam list-mfa-devices --user-name <cli-iam-user>  --query 'MFADevices[].SerialNumber' --output text
+(empty, <cli-iam-user> has no MFA)
 
-$ aws iam list-mfa-devices --user-name mike-admin --query 'MFADevices[].SerialNumber' --output text
-arn:aws:iam::771665904432:mfa/mike-admin
+$ aws iam list-mfa-devices --user-name <secondary-iam-user> --query 'MFADevices[].SerialNumber' --output text
+arn:aws:iam::<management-account>:mfa/<secondary-iam-user>
 
 
 2. Which key was actually dead
@@ -51,9 +51,9 @@ automatically the unused one.
 
 $ aws iam get-access-key-last-used --access-key-id <id>
 
-AKIA...LRNZ   mike-admin   2026-09-06T19:03:00Z   kms   eu-west-1
-AKIA...OWVN   mike-admin   2026-07-15T16:32:00Z   ec2   eu-west-1
-AKIA...O2XG   cli-admin    2026-09-12T19:10:00Z   iam   us-east-1
+AKIA...LRNZ   <secondary-iam-user>   2026-09-06T19:03:00Z   kms   eu-west-1
+AKIA...OWVN   <secondary-iam-user>   2026-07-15T16:32:00Z   ec2   eu-west-1
+AKIA...O2XG   <cli-iam-user>    2026-09-12T19:10:00Z   iam   us-east-1
 
 AKIA...OWVN had not been used for two months.
 
@@ -66,7 +66,7 @@ default
 $ aws configure get aws_access_key_id --profile default
 AKIA...O2XG
 
-Only cli-admin is configured on this machine. Neither of mike-admin's keys is
+Only <cli-iam-user> is configured on this machine. Neither of <secondary-iam-user>'s keys is
 present locally, so this evidence cannot prove where they are used, another
 machine, a CI secret and a console-issued credential are all possible. That
 uncertainty is why the key was deactivated and not deleted, and why the
@@ -75,29 +75,29 @@ still-active key was left alone.
 
 4. The change
 ------------------------------------------------------------------------------
-$ aws iam update-access-key --user-name mike-admin \
+$ aws iam update-access-key --user-name <secondary-iam-user> \
     --access-key-id AKIA...OWVN --status Inactive
 
-$ aws iam list-access-keys --user-name mike-admin \
+$ aws iam list-access-keys --user-name <secondary-iam-user> \
     --query 'AccessKeyMetadata[].[AccessKeyId,Status]' --output text
 AKIA...LRNZ	Active
 AKIA...OWVN	Inactive
 
 Reversible with the command below. The truncated id is not copy-pasteable by
-design; take the full one from `aws iam list-access-keys --user-name mike-admin`
+design; take the full one from `aws iam list-access-keys --user-name <secondary-iam-user>`
 or from the IAM console at the moment you need it.
 
-$ aws iam update-access-key --user-name mike-admin \
+$ aws iam update-access-key --user-name <secondary-iam-user> \
     --access-key-id AKIA...OWVN --status Active
 
 
 5. What is still open
 ------------------------------------------------------------------------------
-- cli-admin still has an active long-lived key and no MFA. It is also the
+- <cli-iam-user> still has an active long-lived key and no MFA. It is also the
   identity every CLI session in this project authenticates as, so it cannot be
   removed until IAM Identity Center access is stood up and proven to work.
   Deleting it first would lock this account's own operator out.
-- mike-admin's remaining key is still active and still long-lived.
+- <secondary-iam-user>'s remaining key is still active and still long-lived.
 - Root MFA is not yet enabled on all three accounts.
 
 The intent of step 4 is to end long-lived keys entirely, not to prune them. This

@@ -13,7 +13,7 @@ free. Cost Explorer charges 0.01 USD per request and was not used, same as on
 
 1. What the alert said, and what the budget actually holds
 ------------------------------------------------------------------------------
-$ aws budgets describe-budgets --account-id 771665904432
+$ aws budgets describe-budgets --account-id <management-account>
 
   BudgetLimit          5.0 USD
   ActualSpend          3.671
